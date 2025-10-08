@@ -1,8 +1,11 @@
+import glob
+import json
 import random
 import os
 from typing import List, Tuple
 
 from datasets import load_dataset, load_from_disk
+from datasets import Dataset as HF_Dataset
 from torch.utils.data import Dataset
 from PIL import Image
 
@@ -258,25 +261,86 @@ class MultiTrainDataset(Dataset):
 
 class EncodeDataset(Dataset):
     """
+    [TODO] Dylan: add NeuCLIR data loader 
     Dataset for encoding.
     Loads data and optionally shards it for distributed processing.
     """
 
     def __init__(self, data_args: DataArguments):
         self.data_args = data_args
-        self.encode_data = load_dataset(
-            self.data_args.dataset_name,
-            self.data_args.dataset_config,
-            data_files=self.data_args.dataset_path,
-            split=self.data_args.dataset_split,
-            cache_dir=self.data_args.dataset_cache_dir,
-            num_proc=self.data_args.num_proc,
-        )
+
+        # local path loading for scale only
+        if 'scale' in self.data_args.dataset_name:
+            self.encode_data = self.load_scale_from_local(data_args)
+        elif 'crux-mds' in self.data_args.dataset_name:
+            self.encode_data = self.load_scale_from_local(data_args)
+        else:
+            self.encode_data = load_dataset(
+                self.data_args.dataset_name,
+                self.data_args.dataset_config,
+                data_files=self.data_args.dataset_path,
+                split=self.data_args.dataset_split,
+                cache_dir=self.data_args.dataset_cache_dir,
+                num_proc=self.data_args.num_proc,
+            )
+
         if self.data_args.dataset_number_of_shards > 1:
             self.encode_data = self.encode_data.shard(
                 num_shards=self.data_args.dataset_number_of_shards,
                 index=self.data_args.dataset_shard_index,
             )
+
+    def load_scale_from_local(self, data_args: DataArguments):
+        if data_args.encode_is_query:
+            query_path = os.path.join(data_args.dataset_path)
+            query = HF_Dataset.from_json(query_path, keep_in_memory=True)
+
+            # for report request
+            def raw_request(example):
+                example["query_text"] = example["problem_statement"]
+                return example
+            def raw_topic(example):
+                # example["query_text"] = example['topics'][0]["topic_title"] + \
+                #         " " + example['topics'][0]["topic_description"] # narrative
+                example["query_text"] = example['topics'][0]["topic_description"]
+                return example
+
+            if data_args.query_type == 'request':
+                query = query.rename_column('request_id', 'query_id') # rename to match the expected format
+                query = query.map(raw_request, num_proc=data_args.num_proc, remove_columns=['background', 'problem_statement'])
+            else:
+                query = query.rename_column('topic_id', 'query_id') # rename to match the expected format
+                query = query.map(raw_topic, num_proc=data_args.num_proc, remove_columns=['topics'])
+            return query
+        else:
+            # Add fixing code for -- Couldn't find docid ... "
+            corpus = []
+            if os.path.exists(data_args.dataset_path):
+                files = [data_args.dataset_path]
+            else:
+                files = glob.glob(data_args.dataset_path)
+            for file in files:
+                with open(file, 'r') as f:
+                    for line in f:
+                        try:
+                            item = json.loads(line.strip())
+                            if ('id' not in item.keys()) and ('_id' in item.keys()):
+                                item['id'] = item.pop('_id')
+                            if ('text' not in item.keys()) and ('contents' in item.keys()):
+                                item['text'] = item.pop('contents')
+                            corpus.append(item)
+                        except:
+                            logger.warning(f"Couldn't parse line: {line.strip()}")
+
+            corpus = HF_Dataset.from_list(corpus) # title and text
+            corpus = corpus.rename_column('id', 'docid')
+            return corpus
+            # Change to this if fixed
+            # corpus_path = os.path.join(data_args.dataset_path)
+            # corpus = HF_Dataset.from_json(corpus_path, keep_in_memory=True) # title and text
+            # corpus = corpus.rename_column('id', 'docid')
+            # corpus = corpus.remove_columns(['cc_file', 'url', 'date'])
+            # return corpus
 
     def __len__(self):
         return len(self.encode_data)

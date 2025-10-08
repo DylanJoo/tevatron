@@ -81,6 +81,7 @@ class ModelArguments:
 
 @dataclass
 class DataArguments:
+    # [NOTE] add new arugmnets for NeuCLIR
     dataset_name: str = field(
         default='json', metadata={"help": "huggingface dataset name"}
     )
@@ -161,6 +162,9 @@ class DataArguments:
         },
     )
 
+    query_type: str = field(
+        default='all', metadata={"help": "prefix or instruction for query"}
+    )
     query_prefix: str = field(
         default='', metadata={"help": "prefix or instruction for query"}
     )
