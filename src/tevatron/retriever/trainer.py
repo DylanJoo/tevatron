@@ -44,12 +44,23 @@ class TevatronTrainer(Trainer):
         # Good practice: save your training arguments together with the trained model
         torch.save(self.args, os.path.join(output_dir, TRAINING_ARGS_NAME))
 
-    def compute_loss(self, model, inputs, return_outputs=False, num_items_in_batch=None):
-        query, passage = inputs
-        return model(query=query, passage=passage).loss
+    def compute_loss(self, model, inputs, return_outputs=False, num_items_in_batch=None, return_loss=None):
+        if isinstance(inputs, dict) is False:
+            query, passage = inputs
+            return model(query=query, passage=passage).loss
+        else:
+            query, passage = inputs['inputs'] # Hacky workaround for `prediction_step`
+            loss = model(query=query, passage=passage).loss
+            return (loss, [])
 
     def training_step(self, *args):
         return super(TevatronTrainer, self).training_step(*args) / self._dist_loss_scale_factor
+
+    def prediction_step(self, models, inputs, *args, **kwargs):
+        query, passage = inputs
+        # inputs = {'query': query, 'passage': passage, 'return_loss': True}
+        inputs = {'inputs': inputs, 'return_loss': True}
+        return super(TevatronTrainer, self).prediction_step(models, inputs, *args, **kwargs)
 
 
 class DistilTevatronTrainer(TevatronTrainer):

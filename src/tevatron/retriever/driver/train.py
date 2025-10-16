@@ -91,7 +91,10 @@ def main():
 
     train_dataset = TrainDataset(data_args)
     collator = TrainCollator(data_args, tokenizer)
-    eval_dataset = QrelDataset(data_args) if data_args.eval_dataset_name is not None else None
+    if training_args.do_eval:
+        eval_dataset = QrelDataset(data_args)
+    else:
+        eval_dataset = None
 
     trainer_cls = GCTrainer if training_args.grad_cache else Trainer
     trainer = trainer_cls(
@@ -102,6 +105,9 @@ def main():
         data_collator=collator
     )
     train_dataset.set_trainer(trainer)
+
+    if training_args.do_eval:
+        eval_dataset.set_trainer(trainer)
     
     last_checkpoint = None
     if os.path.isdir(training_args.output_dir):

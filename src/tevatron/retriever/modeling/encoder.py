@@ -83,7 +83,7 @@ class EncoderModel(nn.Module):
             target = target * (p_reps.size(0) // q_reps.size(0))
 
             pred = scores.detach().argmax(dim=-1)
-            loss = corret = (pred == target).sum()
+            loss = corret = (pred == target).sum().float() # NOTE: this is not loss, we use accuracy as return for evaluation
 
             if self.is_ddp:
                 loss = loss * self.world_size  # counter average weight reduction
