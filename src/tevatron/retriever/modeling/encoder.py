@@ -71,9 +71,25 @@ class EncoderModel(nn.Module):
             if self.is_ddp:
                 loss = loss * self.world_size  # counter average weight reduction
         # for eval
+        # [Dylan] add accuracy calculation for eval
         else:
+            if self.is_ddp:
+                q_reps = self._dist_gather_tensor(q_reps)
+                p_reps = self._dist_gather_tensor(p_reps)
+
             scores = self.compute_similarity(q_reps, p_reps)
-            loss = None
+
+            target = torch.arange(scores.size(0), device=scores.device, dtype=torch.long)
+            target = target * (p_reps.size(0) // q_reps.size(0))
+
+            pred = scores.detach().argmax(dim=-1)
+            loss = corret = (pred == target).sum()
+
+            if self.is_ddp:
+                loss = loss * self.world_size  # counter average weight reduction
+
+            # loss = None
+
         return EncoderOutput(
             loss=loss,
             scores=scores,

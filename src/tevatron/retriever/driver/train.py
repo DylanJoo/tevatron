@@ -12,6 +12,7 @@ from transformers.trainer_utils import get_last_checkpoint
 from tevatron.retriever.arguments import ModelArguments, DataArguments, \
     TevatronTrainingArguments as TrainingArguments
 from tevatron.retriever.dataset import TrainDataset
+from tevatron.retriever.dataset_dev import QrelDataset
 from tevatron.retriever.collator import TrainCollator
 from tevatron.retriever.modeling import DenseModel
 from tevatron.retriever.trainer import TevatronTrainer as Trainer
@@ -90,12 +91,14 @@ def main():
 
     train_dataset = TrainDataset(data_args)
     collator = TrainCollator(data_args, tokenizer)
+    eval_dataset = QrelDataset(data_args) if data_args.eval_dataset_name is not None else None
 
     trainer_cls = GCTrainer if training_args.grad_cache else Trainer
     trainer = trainer_cls(
         model=model,
         args=training_args,
         train_dataset=train_dataset,
+        eval_dataset=eval_dataset,
         data_collator=collator
     )
     train_dataset.set_trainer(trainer)

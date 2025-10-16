@@ -81,6 +81,11 @@ class ModelArguments:
 
 @dataclass
 class DataArguments:
+    # [Dylan] added for eval with qre
+    eval_dataset_name: str = field(default=None, metadata={"help": "quick evaluation using qrel."})
+    eval_dataset_split: str = field(default=None, metadata={"help": "eval data split"})
+    eval_group_size: int = field(default=32, metadata={"help": "number of passages used to eval for each query"})
+
     dataset_name: str = field(
         default='json', metadata={"help": "huggingface dataset name"}
     )
