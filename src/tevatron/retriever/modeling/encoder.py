@@ -21,6 +21,7 @@ class EncoderOutput(ModelOutput):
     p_reps: Optional[Tensor] = None
     loss: Optional[Tensor] = None
     scores: Optional[Tensor] = None
+    logs: Optional[Dict] = None
 
 
 class EncoderModel(nn.Module):
@@ -47,6 +48,7 @@ class EncoderModel(nn.Module):
     def forward(self, query: Dict[str, Tensor] = None, passage: Dict[str, Tensor] = None):
         q_reps = self.encode_query(query) if query else None
         p_reps = self.encode_passage(passage) if passage else None
+        logs = {}
 
         # for inference
         if q_reps is None or p_reps is None:
@@ -77,24 +79,26 @@ class EncoderModel(nn.Module):
                 q_reps = self._dist_gather_tensor(q_reps)
                 p_reps = self._dist_gather_tensor(p_reps)
 
-            scores = self.compute_similarity(q_reps, p_reps)
+            scores = self.compute_similarity(q_reps, p_reps).detach()
 
             target = torch.arange(scores.size(0), device=scores.device, dtype=torch.long)
             target = target * (p_reps.size(0) // q_reps.size(0))
 
-            pred = scores.detach().argmax(dim=-1)
-            loss = corret = (pred == target).sum().float() # NOTE: this is not loss, we use accuracy as return for evaluation
-
+            loss = self.compute_loss(scores / self.temperature, target).detach()
             if self.is_ddp:
                 loss = loss * self.world_size  # counter average weight reduction
 
-            # loss = None
+            # NOTE: eval metrics
+            pred = scores.argmax(dim=-1)
+            logs['acc'] = (pred == target).float().mean().item()
+            logs['prob_d+'] = (scores.softmax(dim=-1)).gather(1, target[None, :]).mean().item()
 
         return EncoderOutput(
             loss=loss,
             scores=scores,
             q_reps=q_reps,
             p_reps=p_reps,
+            logs=logs
         )
 
     def encode_passage(self, psg):

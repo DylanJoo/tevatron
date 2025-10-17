@@ -50,7 +50,10 @@ class TevatronTrainer(Trainer):
             return model(query=query, passage=passage).loss
         else:
             query, passage = inputs['inputs'] # Hacky workaround for `prediction_step`
-            loss = model(query=query, passage=passage).loss
+            outputs = model(query=query, passage=passage)
+            loss = outputs.loss
+            self.log({f"eval/{key}": outputs.logs[key] for key in outputs.logs})
+
             return (loss, [])
 
     def training_step(self, *args):
