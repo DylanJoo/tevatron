@@ -90,8 +90,20 @@ class EncoderModel(nn.Module):
 
             # NOTE: eval metrics
             pred = scores.argmax(dim=-1)
-            logs['acc'] = (pred == target).float().mean().item()
-            logs['prob_d+'] = (scores.softmax(dim=-1)).gather(1, target[None, :]).mean().item()
+            acc = (pred == target).float().mean().item()
+            ## NOTE: add masking for the in-batch negatives
+            # prob_d = (scores.softmax(dim=-1)).gather(1, target[None, :]).mean().item()
+            bsz, ssz = scores.size(0), scores.size(1)
+            mask = torch.arange(bsz).repeat_interleave(ssz // bsz) == torch.arange(bsz).unsqueeze(1)
+            masked_scores = scores.masked_fill(~mask.to(scores.device), -torch.inf)
+            prob_d = (masked_scores.softmax(dim=-1)).gather(1, target[None, :]).mean().item()
+
+            if self.is_ddp:
+                acc = acc * self.world_size  
+                prob_d = prob_d * self.world_size
+
+            logs['acc'] = acc
+            logs['prob_d+'] = prob_d
 
         return EncoderOutput(
             loss=loss,
