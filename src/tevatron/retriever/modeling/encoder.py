@@ -72,38 +72,53 @@ class EncoderModel(nn.Module):
             loss = self.compute_loss(scores / self.temperature, target)
             if self.is_ddp:
                 loss = loss * self.world_size  # counter average weight reduction
+
         # for eval
         # [Dylan] add accuracy calculation for eval
         else:
-            if self.is_ddp:
-                q_reps = self._dist_gather_tensor(q_reps)
-                p_reps = self._dist_gather_tensor(p_reps)
-
             scores = self.compute_similarity(q_reps, p_reps).detach()
-
+            pred = scores.argmax(dim=-1)
             target = torch.arange(scores.size(0), device=scores.device, dtype=torch.long)
             target = target * (p_reps.size(0) // q_reps.size(0))
+            loss = self.compute_loss(scores / self.temperature, target)
+            correct = (pred == target).float()
 
-            loss = self.compute_loss(scores / self.temperature, target).detach()
+            print(f'accuracy', correct)
+            print(f'pred ({self.process_rank})', pred)
+            print(f'target ({self.process_rank})', target)
+
             if self.is_ddp:
-                loss = loss * self.world_size  # counter average weight reduction
+                correct = self._dist_gather_tensor(correct)
 
-            # NOTE: eval metrics
-            pred = scores.argmax(dim=-1)
-            acc = (pred == target).float().mean().item()
+            logs['acc'] = (100 * correct).mean().item()
+
+            # if self.is_ddp:
+            #     q_reps = self._dist_gather_tensor(q_reps) 
+            #     p_reps = self._dist_gather_tensor(p_reps)
+            #   print('q_reps (a)', q_reps.shape, self.process_rank)
+            #   print('p_reps (a)', p_reps.shape, self.process_rank)
+            #
+            # scores = self.compute_similarity(q_reps, p_reps).detach() # 2B x 2B
+            #
+            # target = torch.arange(scores.size(0), device=scores.device, dtype=torch.long)
+            # target = target * (p_reps.size(0) // q_reps.size(0))
+            #
+            # loss = self.compute_loss(scores / self.temperature, target).detach()
+            # # if self.is_ddp:
+            # #     loss = loss * self.world_size  # counter average weight reduction
+            #
+            # # NOTE: eval metrics
+            # pred = scores.argmax(dim=-1)
+            # logs['acc'] = 100 * (pred == target).float().mean().item()
+            # print('pred', pred, 'target', target)
+
             ## NOTE: add masking for the in-batch negatives
             # prob_d = (scores.softmax(dim=-1)).gather(1, target[None, :]).mean().item()
-            bsz, ssz = scores.size(0), scores.size(1)
-            mask = torch.arange(bsz).repeat_interleave(ssz // bsz) == torch.arange(bsz).unsqueeze(1)
-            masked_scores = scores.masked_fill(~mask.to(scores.device), -torch.inf)
-            prob_d = (masked_scores.softmax(dim=-1)).gather(1, target[None, :]).mean().item()
-
-            if self.is_ddp:
-                acc = acc * self.world_size  
-                prob_d = prob_d * self.world_size
-
-            logs['acc'] = acc
-            logs['prob_d+'] = prob_d
+            # bsz, ssz = scores.size(0), scores.size(1)
+            # mask = torch.arange(bsz).repeat_interleave(ssz // bsz) == torch.arange(bsz).unsqueeze(1)
+            # masked_scores = scores.masked_fill(~mask.to(scores.device), -torch.inf)
+            # prob_d = (masked_scores.softmax(dim=-1)).gather(1, target[None, :])
+            # logs['prob_d+'] = prob_d.mean()
 
         return EncoderOutput(
             loss=loss,

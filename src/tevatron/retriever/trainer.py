@@ -2,6 +2,7 @@ import os
 from typing import Optional
 
 import torch
+from torch.utils.data import DataLoader
 
 from transformers.trainer import Trainer, TRAINING_ARGS_NAME
 import torch.distributed as dist
@@ -65,6 +66,16 @@ class TevatronTrainer(Trainer):
         inputs = {'inputs': inputs, 'return_loss': True}
         return super(TevatronTrainer, self).prediction_step(models, inputs, *args, **kwargs)
 
+    def get_eval_dataloader(self, eval_dataset) -> DataLoader:
+        data_collator = self.data_collator
+        return DataLoader(
+            eval_dataset,
+            sampler=None,
+            collate_fn=data_collator,
+            batch_size=self.args.per_device_eval_batch_size,
+            shuffle=False,
+            drop_last=False
+        )
 
 class DistilTevatronTrainer(TevatronTrainer):
     def __init__(self, *args, **kwargs):

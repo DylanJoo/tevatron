@@ -15,6 +15,7 @@ from tqdm import tqdm
 logger = logging.getLogger(__name__)
 
 
+# TODO: fixed random seed 
 class QrelDataset(Dataset):
     """
     Dataset for training which handles both query and passage data.
@@ -108,8 +109,10 @@ class QrelDataset(Dataset):
 
     def __getitem__(self, item):
         group = self.eval_data[item]
-        epoch = int(self.trainer.state.epoch)
-        _hashed_seed = hash(item + self.trainer.args.seed)
+        # epoch = int(self.trainer.state.epoch)
+        # _hashed_seed = hash(item + self.trainer.args.seed)
+        epoch = 0  # fixed the epoch, so we have consistent randomness
+        _hashed_seed = hash(item + 42) # fixed the hash
 
         # Handling the legacy format with 'positive_passages' (removed, see dataset.py)
         # Handling the new format
