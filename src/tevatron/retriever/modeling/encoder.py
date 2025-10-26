@@ -83,10 +83,6 @@ class EncoderModel(nn.Module):
             loss = self.compute_loss(scores / self.temperature, target)
             correct = (pred == target).float()
 
-            print(f'accuracy', correct)
-            print(f'pred ({self.process_rank})', pred)
-            print(f'target ({self.process_rank})', target)
-
             if self.is_ddp:
                 correct = self._dist_gather_tensor(correct)
 
@@ -95,9 +91,6 @@ class EncoderModel(nn.Module):
             # if self.is_ddp:
             #     q_reps = self._dist_gather_tensor(q_reps) 
             #     p_reps = self._dist_gather_tensor(p_reps)
-            #   print('q_reps (a)', q_reps.shape, self.process_rank)
-            #   print('p_reps (a)', p_reps.shape, self.process_rank)
-            #
             # scores = self.compute_similarity(q_reps, p_reps).detach() # 2B x 2B
             #
             # target = torch.arange(scores.size(0), device=scores.device, dtype=torch.long)
@@ -108,9 +101,6 @@ class EncoderModel(nn.Module):
             # #     loss = loss * self.world_size  # counter average weight reduction
             #
             # # NOTE: eval metrics
-            # pred = scores.argmax(dim=-1)
-            # logs['acc'] = 100 * (pred == target).float().mean().item()
-            # print('pred', pred, 'target', target)
 
             ## NOTE: add masking for the in-batch negatives
             # prob_d = (scores.softmax(dim=-1)).gather(1, target[None, :]).mean().item()
