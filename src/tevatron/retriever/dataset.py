@@ -64,6 +64,10 @@ class TrainDataset(Dataset):
             docids = corpus_ids['docid']
             self.docid_to_index = {docid: index for index, docid in enumerate(tqdm(docids))}
 
+        # exclude title if specified
+        if self.data_args.exclude_title:
+            self.corpus = self.corpus.remove_columns(['title'])
+            logger.warning("Title is excluded.")
 
     def set_trainer(self, trainer):
         """Sets the trainer for the dataset."""
@@ -94,7 +98,9 @@ class TrainDataset(Dataset):
                 assert isinstance(audio, str) and audio.endswith('.mp3')
                 audio = os.path.join(self.corpus_assets_path, audio)
 
-        text = document_info.get('text', '')
+        text = document_info.get('text', '') 
+        if ('title' in document_info) and (len(document_info['title']) > 2): # Tevatron corpus has title as "-"
+            text = document_info['title'] + ' ' + text
 
         if not self.data_args.encode_text:
             text = None
@@ -110,8 +116,8 @@ class TrainDataset(Dataset):
 
     def __getitem__(self, item):
         group = self.train_data[item]
-        epoch = int(self.trainer.state.epoch)
-        _hashed_seed = hash(item + self.trainer.args.seed)
+        epoch = int(self.trainer.state.epoch) if self.trainer else 0
+        _hashed_seed = hash(item + self.trainer.args.seed) if self.trainer else 0
 
         # Handling the legacy format with 'positive_passages'
         if 'positive_passages' in group:
@@ -277,6 +283,11 @@ class EncodeDataset(Dataset):
                 num_shards=self.data_args.dataset_number_of_shards,
                 index=self.data_args.dataset_shard_index,
             )
+
+        # exclude title if specified
+        if self.data_args.exclude_title:
+            self.encode_data = self.encode_data.remove_columns(['title'])
+            logger.warning("Title is excluded.")
 
     def __len__(self):
         return len(self.encode_data)
