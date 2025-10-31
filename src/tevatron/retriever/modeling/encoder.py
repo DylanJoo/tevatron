@@ -83,9 +83,9 @@ class EncoderModel(nn.Module):
             loss = self.compute_loss(scores / self.temperature, target)
             correct = (pred == target).float()
 
-            print(f'accuracy', correct)
-            print(f'pred ({self.process_rank})', pred)
-            print(f'target ({self.process_rank})', target)
+            # print(f'accuracy', correct)
+            # print(f'pred ({self.process_rank})', pred)
+            # print(f'target ({self.process_rank})', target)
 
             if self.is_ddp:
                 correct = self._dist_gather_tensor(correct)

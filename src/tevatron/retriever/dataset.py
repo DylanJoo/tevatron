@@ -278,21 +278,32 @@ class EncodeDataset(Dataset):
                 index=self.data_args.dataset_shard_index,
             )
 
+        ## fix the id issue # TODO: move this to getitem?
+        # if 'docid' not in self.encode_data.column_names:
+        #     if 'id' in self.encode_data.column_names:
+        #         self.encode_data = self.encode_data.rename_column('id', 'docid')
+        #     if '_id' in self.encode_data.column_names:
+        #         self.encode_data = self.encode_data.rename_column('_id', 'docid')
+        #
+        # if 'text' not in self.encode_data.column_names:
+        #     if 'contents' in self.encode_data.column_names:
+        #         self.encode_data = self.encode_data.rename_column('contents', 'text')
+
     def __len__(self):
         return len(self.encode_data)
 
     def __getitem__(self, item):
         content = self.encode_data[item]
         if self.data_args.encode_is_query:
-            content_id = content['query_id']
-            content_text = content.get('query_text', content.get('query', ''))
+            content_id = content.get('query_id', content.get('id', None))
+            content_text = content.get('query_text', content.get('query', content.get('request', '')))
             content_text = self.data_args.query_prefix + content_text
             content_image = content.get('query_image', None)
             content_video = content.get('query_video', None)
             content_audio = content.get('query_audio', None)
         else:
-            content_id = content['docid']
-            content_text = content.get('text', '')
+            content_id = content.get('docid', content.get('id', content.get('_id', None)))
+            content_text = content.get('text', content.get('contents', ''))
             if 'title' in content:
                 content_text = content['title'] + ' ' + content_text
             content_text = self.data_args.passage_prefix + content_text.strip()
