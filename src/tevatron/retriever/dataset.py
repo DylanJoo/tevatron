@@ -286,8 +286,9 @@ class EncodeDataset(Dataset):
 
         # exclude title if specified
         if self.data_args.exclude_title:
-            self.encode_data = self.encode_data.remove_columns(['title'])
-            logger.warning("Title is excluded.")
+            if "title" in self.encode_data.column_names:
+                self.encode_data = self.encode_data.remove_columns(['title'])
+                logger.warning("Title is excluded.")
 
     def __len__(self):
         return len(self.encode_data)
