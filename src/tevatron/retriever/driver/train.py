@@ -92,7 +92,7 @@ def main():
     train_dataset = TrainDataset(data_args)
     collator = TrainCollator(data_args, tokenizer)
     if training_args.do_eval:
-        eval_dataset = QrelDataset(data_args)
+        eval_dataset = QrelDataset(data_args, corpus_name=data_args.eval_corpus_name)
     else:
         eval_dataset = None
 
