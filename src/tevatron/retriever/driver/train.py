@@ -89,12 +89,27 @@ def main():
         attn_implementation=model_args.attn_implementation,
     )
 
-    train_dataset = TrainDataset(data_args)
-    collator = TrainCollator(data_args, tokenizer)
-    if training_args.do_eval:
-        eval_dataset = QrelDataset(data_args, corpus_name=data_args.eval_corpus_name)
+    # NOTE: use dataset_path if it is pre-tokenized
+    # TODO: see if we want to load from HF as well, then we can use `dataset_name`
+    if data_args.pretokenized:
+        from datasets import load_from_disk
+        dataset = load_from_disk(data_args.dataset_path)
+        dataset = dataset.remove_columns(["query", "passage_group"])
+        dataset = dataset.rename_column("query_tokenized", "query")
+        dataset = dataset.rename_column("passage_tokenized", "passage")
+        collator = TrainCollator(data_args, tokenizer)
+        train_dataset = dataset['train']
+        if training_args.do_eval:
+            eval_dataset = dataset['eval']
+        else:
+            eval_dataset = None
     else:
-        eval_dataset = None
+        train_dataset = TrainDataset(data_args)
+        collator = TrainCollator(data_args, tokenizer)
+        if training_args.do_eval:
+            eval_dataset = QrelDataset(data_args, corpus_name=data_args.eval_corpus_name)
+        else:
+            eval_dataset = None
 
     trainer_cls = GCTrainer if training_args.grad_cache else Trainer
     trainer = trainer_cls(
@@ -104,10 +119,12 @@ def main():
         eval_dataset=eval_dataset,
         data_collator=collator
     )
-    train_dataset.set_trainer(trainer)
 
-    if training_args.do_eval:
-        eval_dataset.set_trainer(trainer)
+    # TODO: make this easier to understand
+    if data_args.pretokenized is False:
+        train_dataset.set_trainer(trainer)
+        if training_args.do_eval:
+            eval_dataset.set_trainer(trainer)
     
     last_checkpoint = None
     if os.path.isdir(training_args.output_dir):

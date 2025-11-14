@@ -81,12 +81,14 @@ class ModelArguments:
 
 @dataclass
 class DataArguments:
-    # [Dylan] added for eval with qre
+    # [Dylan] added for eval with qrel
     eval_dataset_name: str = field(default=None, metadata={"help": "quick evaluation using qrel."})
     eval_dataset_split: str = field(default=None, metadata={"help": "eval data split"})
     eval_group_size: int = field(default=32, metadata={"help": "number of passages used to eval for each query"})
     eval_corpus_name: str = field(default=None, metadata={"help": "the corpus name for docid in eval set, None would use `corpus_name`"})
     exclude_title: bool = field(default=False, metadata={"help": "append title in the begining."})
+    # [Dylan] added for faster training (increase GPU utilization)
+    pretokenized: bool = field(default=False, metadata={"help": "whether or not the dataset is pretokenized"})
 
     dataset_name: str = field(
         default='json', metadata={"help": "huggingface dataset name"}
