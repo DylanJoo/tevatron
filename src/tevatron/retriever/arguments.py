@@ -64,7 +64,7 @@ class ModelArguments:
 
     # for Jax training
     dtype: Optional[str] = field(
-        default="float32",
+        default="bfloat16",
         metadata={
             "help": "Floating-point format in which the model weights should be initialized and trained. Choose one "
                     "of `[float32, float16, bfloat16]`. "
