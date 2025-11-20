@@ -89,21 +89,22 @@ def main():
         attn_implementation=model_args.attn_implementation,
     )
 
-    # NOTE: use dataset_path if it is pre-tokenized
     # TODO: see if we want to load from HF as well, then we can use `dataset_name`
+    # NOTE: the data_args.dataset_config becomes the name of subset
     if data_args.pretokenized:
-        from datasets import load_from_disk
-        dataset = load_from_disk(data_args.dataset_path)
+        from datasets import load_dataset
+        subset_name = model_args.model_name_or_path.split('/')[-1].lower()
+
+        logger.warning(f"Using pre-tokenized dataset: {data_args.dataset_name} with subset {subset_name}")
+        dataset = load_dataset(data_args.dataset_name, subset_name)
         dataset = dataset.remove_columns(["query", "passage_group"])
         dataset = dataset.rename_column("query_tokenized", "query")
         dataset = dataset.rename_column("passage_tokenized", "passage")
         collator = TrainCollator(data_args, tokenizer)
         train_dataset = dataset['train']
-        if training_args.do_eval:
-            eval_dataset = dataset['eval']
-        else:
-            eval_dataset = None
-    else:
+        eval_dataset = dataset['eval']
+
+    if data_args.pretokenized is False:
         train_dataset = TrainDataset(data_args)
         collator = TrainCollator(data_args, tokenizer)
         if training_args.do_eval:

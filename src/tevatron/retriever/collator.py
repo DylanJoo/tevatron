@@ -27,6 +27,7 @@ class TrainCollator:
         :return: tokenized query_ids, passage_ids
         """
         if self.data_args.pretokenized is False:
+            # NOTE: the standard setting returns list of tuples 
             all_queries = [f[0] for f in features]
             all_passages = []
             for f in features:
