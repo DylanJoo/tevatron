@@ -28,7 +28,7 @@ def search_queries(retriever, q_reps, p_lookup, args):
     psg_indices = np.array(psg_indices)
     return all_scores, psg_indices
 
-def search_mmr_queries(retriever, 
+def search_queries_mmr(retriever, 
                        q_reps, 
                        q_lookup,
                        p_reps, 
@@ -168,7 +168,7 @@ def main():
                                                      ngpu=num_gpus)
 
     logger.info('Index Search Start')
-    all_scores, psg_indices = search_mmr_queries(retriever, 
+    all_scores, psg_indices = search_queries_mmr(retriever, 
                                                  q_reps, 
                                                  q_lookup,
                                                  all_p_reps, 
