@@ -11,7 +11,6 @@ from tevatron.retriever.arguments import DataArguments
 
 logger = logging.getLogger(__name__)
 
-
 @dataclass
 class TrainCollator:
     """
@@ -372,8 +371,8 @@ class DistilTrainCollator:
     """
     collator for distillation data.
     """
-    tokenizer: PreTrainedTokenizer
     data_args: DataArguments
+    tokenizer: PreTrainedTokenizer
     torch_dtype: torch.dtype = torch.bfloat16
 
     def __call__(self, features: List[Tuple[str, List[str]]]):

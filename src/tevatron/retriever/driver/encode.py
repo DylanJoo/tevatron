@@ -75,6 +75,10 @@ def main():
         attn_implementation=model_args.attn_implementation,
     )
 
+    if isinstance(data_args.dataset_name, list):
+        data_args.dataset_name = data_args.dataset_name[0]
+        data_args.dataset_split = data_args.dataset_split[0]
+
     encode_dataset = EncodeDataset(
         data_args=data_args,
     )

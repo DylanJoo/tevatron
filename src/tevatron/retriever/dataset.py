@@ -1,6 +1,7 @@
 import random
 import os
 from typing import List, Tuple
+from copy import copy
 
 from datasets import load_dataset, load_from_disk
 from torch.utils.data import Dataset
@@ -98,9 +99,9 @@ class TrainDataset(Dataset):
                 assert isinstance(audio, str) and audio.endswith('.mp3')
                 audio = os.path.join(self.corpus_assets_path, audio)
 
-        text = document_info.get('text', '') 
+        text = document_info.get('text', '')
         if ('title' in document_info) and (len(document_info['title']) > 2): # Tevatron corpus has title as "-"
-            text = document_info['title'] + ' ' + text
+            text = (document_info['title'] + ' ' + text).strip()
 
         if not self.data_args.encode_text:
             text = None
@@ -203,47 +204,19 @@ class MultiTrainDataset(Dataset):
                  data_args: DataArguments,
                  dataset_list=None,
                  corpus_list=None,
+                 dataset_split_list=None,
                  trainer=None):
         self.data_args = data_args
         self.trainer = trainer
         self.train_datasets = []
 
-        for ds_entry, corpus_entry in zip(dataset_list, corpus_list):
-            ds_path = ds_entry['name']
-            corpus_path = corpus_entry['name']
-            corpus_assets_path = corpus_entry['assets_path']
-            dataset_name = None
-            corpus_name = None
-            ds_file = None
-            corpus_file = None
-
-            # Determine dataset type
-            if os.path.isdir(ds_path):
-                dataset_name = ds_path
-            elif ds_path.endswith('.jsonl'):
-                dataset_name = 'json'
-                ds_file = ds_path
-            else:
-                dataset_name = ds_path
-
-            # Determine corpus type
-            if corpus_path is None:
-                corpus_name = None
-            elif os.path.isdir(corpus_path):
-                corpus_name = corpus_path
-            elif corpus_path.endswith('.jsonl'):
-                corpus_name = 'json'
-                corpus_file = corpus_path
-            else:
-                corpus_name = corpus_path
-
-            self.train_datasets.append(
-                TrainDataset(self.data_args, self.trainer,
-                             dataset_name, corpus_name,
-                             dataset_path=ds_file,
-                             corpus_path=corpus_file,
-                             corpus_assets_path=corpus_assets_path)
-            )
+        # NOTE: original implementation supports only the file input
+        for dataset_name, corpus_name, dataset_split in zip(dataset_list, corpus_list, dataset_split_list):
+            data_args = copy(self.data_args)
+            data_args.dataset_name = dataset_name
+            data_args.corpus_name = corpus_name
+            data_args.dataset_split = dataset_split
+            self.train_datasets.append(TrainDataset(data_args, self.trainer))
 
     def __len__(self):
         return sum(len(dataset) for dataset in self.train_datasets)
@@ -345,7 +318,13 @@ class EncodeDataset(Dataset):
 
 
 class DistilTrainDataset(TrainDataset):
-    def __init__(self, data_args: DataArguments, trainer = None, dataset_name = None, corpus_name = None, dataset_path = None, corpus_path = None):
+    def __init__(self, 
+                 data_args: DataArguments, 
+                 trainer = None, 
+                 dataset_name = None, 
+                 corpus_name = None, 
+                 dataset_path = None, 
+                 corpus_path = None):
         super().__init__(data_args, trainer, dataset_name, corpus_name, dataset_path, corpus_path)
 
     def _get_score_from_docid(self, docid):
@@ -395,32 +374,44 @@ class DistilTrainDataset(TrainDataset):
         query_image = None if 'query_image' not in group else group['query_image']
         positive_document_ids = group['positive_document_ids']
         negative_document_ids = group['negative_document_ids']
+        positive_scores = group['positive_document_scores']
+        negative_scores = group['negative_document_scores']
 
         formated_query = (self.data_args.query_prefix + query_text, query_image)
         formated_documents, formated_scores = [], []
 
         selected_positive_document_id = positive_document_ids[(_hashed_seed + epoch) % len(positive_document_ids)]
-        positive_text, positive_image = self._get_info_from_docid(selected_positive_document_id, self.data_args.passage_prefix)
-        positive_score = self._get_score_from_docid(selected_positive_document_id)
-        formated_documents.append((positive_text, positive_image))
+        # positive_text, positive_image = self._get_info_from_docid(selected_positive_document_id, self.data_args.passage_prefix)
+        positive_score = positive_scores[(_hashed_seed + epoch) % len(positive_document_ids)]
+        # formated_documents.append((positive_text, positive_image))
+        formated_documents.append(
+            self._get_info_from_docid(selected_positive_document_id, self.data_args.passage_prefix)
+        )
         formated_scores.append(positive_score)
 
+        negative_indices = list(range(len(negative_document_ids)))
         negative_size = self.data_args.train_group_size - 1
         if len(negative_document_ids) < negative_size:
-            selected_negative_document_ids = random.choices(negative_document_ids, k=negative_size)
+            # selected_negative_document_ids = random.choices(negative_document_ids, k=negative_size)
+            selected_negative_document_indices = random.choices(negative_indices, k=negative_size)
         elif self.data_args.train_group_size == 1:
-            selected_negative_document_ids = []
+            selected_negative_document_idices = []
         else:
             _offset = epoch * negative_size % len(negative_document_ids)
-            selected_negative_document_ids = [x for x in negative_document_ids]
-            random.Random(_hashed_seed).shuffle(selected_negative_document_ids)
-            selected_negative_document_ids = selected_negative_document_ids * 2
-            selected_negative_document_ids = selected_negative_document_ids[_offset: _offset + negative_size]
+            # selected_negative_document_ids = [x for x in negative_document_ids]
+            selected_negative_document_indices = [x for x in negative_indices]
+            random.Random(_hashed_seed).shuffle(selected_negative_document_indices)
+            selected_negative_document_indices = selected_negative_document_indices * 2
+            selected_negative_document_indices = selected_negative_document_indices[_offset: _offset + negative_size]
 
-        for negative_document_id in selected_negative_document_ids:
-            negative_document_text, negative_document_image = self._get_info_from_docid(negative_document_id, self.data_args.passage_prefix)
-            formated_documents.append((negative_document_text, negative_document_image))
-            negative_document_score = self._get_score_from_docid(negative_document_id)
-            formated_scores.append(negative_document_score)
+        for idx in selected_negative_document_indices:
+            negative_document_id = negative_document_ids[idx]
+            formated_documents.append(
+                self._get_info_from_docid(negative_document_id, self.data_args.passage_prefix)
+            )
+            formated_scores.append(negative_scores[idx])
 
+        # formatted_documents.append(
+        #     self._get_info_from_docid(selected_positive_docid, self.data_args.passage_prefix)
+        # )
         return formated_query, formated_documents, formated_scores
