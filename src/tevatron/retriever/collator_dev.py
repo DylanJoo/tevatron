@@ -12,7 +12,7 @@ from tevatron.retriever.arguments import DataArguments
 logger = logging.getLogger(__name__)
 
 @dataclass
-class TrainCollator:
+class CovDistilTrainCollator:
     """
     simple collator for text only data.
     """
@@ -33,7 +33,7 @@ class TrainCollator:
             n_sq = len(all_subqueries)
             all_passages.extend(f[1])
             all_subqueries.extend(f[2])
-            num_subqueries.extends(len(f[2]))
+            num_subqueries.append(len(f[2]))
 
         all_queries = [q[0] for q in all_queries]
         all_passages = [p[0] for p in all_passages]

@@ -38,6 +38,7 @@ class CovDistilTrainDataset(TrainDataset):
         formatted_documents = []
         positive_document_ids = group['positive_document_ids']
         negative_document_ids = group['negative_document_ids']
+        subqueries = group['subquestions']
 
         # Select positive document id
         selected_positive_docid = positive_document_ids[(_hashed_seed + epoch) % len(positive_document_ids)]
@@ -66,9 +67,10 @@ class CovDistilTrainDataset(TrainDataset):
         # Select subquery and mapping
         flatten_formatted_subqueries = [self.data_args.query_prefix + sq for sq in subqueries]
 
-        return formatted_query, formatted_documents, flatten_formatted_subquery
+        return formatted_query, formatted_documents, flatten_formatted_subqueries
 
-# TODO: fixed random seed 
+# TODO: as the rankvalidator seems to be more useful then calling evaluation
+# NOTE: think about remove this and only use rankvalidator (so disgard this)
 class QrelDataset(Dataset):
     """
     Dataset for training which handles both query and passage data.

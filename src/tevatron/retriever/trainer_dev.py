@@ -20,25 +20,32 @@ class TevatronCovDistilTrainer(TevatronTrainer):
             query, passage, subquery, num_subqueries = inputs
 
             # get shape/sizes
-            group_size = passage.size(0) // query.size(0)
+            group_size = passage['input_ids'].size(0) // query['input_ids'].size(0)
+            # print('group_size', group_size)
 
             # standard forward passing (already gathered scores and reps)
             output = model(query=query, passage=passage)
             loss_rel, student_scores = output.loss, output.scores
             p_block_reps = output.p_reps.view(-1, group_size, output.p_reps.size(-1))
             batch_size = student_scores.size(0)
+            # print('student_scores', student_scores.shape)
+            # print('p_block_reps', p_block_reps.shape)
+            # print('batch_size', batch_size)
 
             # forward subquery and calculate relevance individually
-            sq_reps = self.encode_query(subquery)
             if hasattr(model, 'module'):
+                sq_reps = model.module.encode_query(subquery)
                 if model.module.is_ddp:
                     sq_reps = model.module._dist_gather_tensor(sq_reps)
                     num_subqueries = model.module._dist_gather_tensor(num_subqueries)
             else:
+                sq_reps = model.encode_query(subquery)
                 if model.is_ddp:
                     sq_reps = model._dist_gather_tensor(sq_reps)
                     num_subqueries = model._dist_gather_tensor(num_subqueries)
 
+            # print('sq_reps', sq_reps.shape)
+            # print('num_subqueries', num_subqueries)
             # calcuate teacher scores
             teacher_scores = torch.full(
                 (batch_size, group_size), -float("inf"), device=student_scores.device
@@ -46,18 +53,27 @@ class TevatronCovDistilTrainer(TevatronTrainer):
 
             offset = 0
             for idx in range(batch_size):
-                n_sq = num_subqueries[idx].item()
+                n_sq = num_subqueries[idx]
                 scores = sq_reps[offset: (offset+n_sq)] @ p_block_reps[idx].T # (m, h) x (n, h)
-                teacher_scores[idx] = torch.logsumexp(scores, dim=0) # (n,)
+                # NOTE: aggregation strategy
+                teacher_scores[idx] = torch.logsumexp(scores, dim=0) # (m, n) --> (n,)
                 offset += n_sq
 
+            # print('teacher_scores', teacher_scores.shape)
             # calculate local covdistillation
             student_scores_local = student_scores.view(batch_size, batch_size, group_size)
-            student_scores_local = student_scores_local.diagnol(dim1=0, dim2=1)
+            student_scores_local = student_scores_local.diagonal(dim1=0, dim2=1).transpose(0, 1)
+            # NOTE: (B, B, N)...in each query over B, it has B rows of scores. 
+            # NOTE: In each row, it represents the distribution of all the groups if docs 
+            # NOTE: to assign the "own" docs, we will get student_scores_local[i, i, :] 
+            # NOTE: Finally, do the transpose (N, B) --> (B, N)
+            # print('student_scores_local', student_scores_local.shape)
 
             T = self.args.distil_temperature
             student_log   = torch.log_softmax(student_scores_local.float() / T, dim=1)
             teacher_probs = torch.softmax(teacher_scores.float()    / T, dim=1)
+            print('student_log', student_log[0])
+            print('teacher_probs', teacher_probs[0])
 
             # KL Divergence loss (shapes now [batch, num_labels])
             loss_distil = torch.nn.functional.kl_div(
@@ -67,9 +83,8 @@ class TevatronCovDistilTrainer(TevatronTrainer):
             ) * self._dist_loss_scale_factor
 
             # loss
-            self.log({"train/constrastive": loss_rel, "train/covdistil": loss_distil}
-            loss = loss_rel + loss_distil * 0.5
-
+            self.log({"train/constrastive": loss_rel, "train/covdistil": loss_distil})
+            return loss_rel + loss_distil * 0.5
         else:
             query, passage = inputs['inputs'] # Hacky workaround for `prediction_step`
             outputs = model(query=query, passage=passage)

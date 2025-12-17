@@ -11,17 +11,12 @@ from transformers.trainer_utils import get_last_checkpoint
 
 from tevatron.retriever.arguments import ModelArguments, DataArguments, \
     TevatronTrainingArguments as TrainingArguments
-# from tevatron.retriever.dataset import TrainDataset
-from tevatron.retriever.dataset_dev import QrelDataset
-# from tevatron.retriever.collator import TrainCollator
+
 from tevatron.retriever.modeling import DenseModel
-# from tevatron.retriever.trainer import TevatronTrainer as Trainer
-from tevatron.retriever.gc_trainer import GradCacheTrainer as GCTrainer
 
 from tevatron.retriever.dataset_dev import CovDistilTrainDataset
-from tevatron.retriever.collator_dev import TrainCollator
-# from tevatron.retriever.trainer import TevatronTrainer as Trainer
-from tevatron.retriever.trainer_dev import as Trainer
+from tevatron.retriever.collator_dev import CovDistilTrainCollator
+from tevatron.retriever.trainer_dev import TevatronCovDistilTrainer as Trainer
 
 logger = logging.getLogger(__name__)
 
@@ -90,34 +85,18 @@ def main():
         model_args,
         training_args,
         cache_dir=model_args.cache_dir,
-        dtype=torch_dtype,
+        torch_dtype=torch_dtype,
         attn_implementation=model_args.attn_implementation,
     )
+        # dtype=torch_dtype,
 
     # TODO: see if we want to load from HF as well, then we can use `dataset_name`
     # NOTE: the data_args.dataset_config becomes the name of subset
-    if data_args.pretokenized:
-        from datasets import load_dataset
-        subset_name = model_args.model_name_or_path.split('/')[-1].lower()
+    trainer_cls = Trainer
+    train_dataset = CovDistilTrainDataset(data_args)
+    collator = CovDistilTrainCollator(data_args, tokenizer)
+    eval_dataset = None
 
-        logger.warning(f"Using pre-tokenized dataset: {data_args.dataset_name} with subset {subset_name}")
-        dataset = load_dataset(data_args.dataset_name, subset_name)
-        dataset = dataset.remove_columns(["query", "passage_group"])
-        dataset = dataset.rename_column("query_tokenized", "query")
-        dataset = dataset.rename_column("passage_tokenized", "passage")
-        collator = TrainCollator(data_args, tokenizer)
-        train_dataset = dataset['train']
-        eval_dataset = dataset['eval']
-
-    if data_args.pretokenized is False:
-        train_dataset = TrainDataset(data_args)
-        collator = TrainCollator(data_args, tokenizer)
-        if training_args.do_eval:
-            eval_dataset = QrelDataset(data_args, corpus_name=data_args.eval_corpus_name)
-        else:
-            eval_dataset = None
-
-    trainer_cls = GCTrainer if training_args.grad_cache else Trainer
     trainer = trainer_cls(
         model=model,
         args=training_args,
@@ -127,10 +106,7 @@ def main():
     )
 
     # TODO: make this easier to understand
-    if data_args.pretokenized is False:
-        train_dataset.set_trainer(trainer)
-        if training_args.do_eval:
-            eval_dataset.set_trainer(trainer)
+    train_dataset.set_trainer(trainer)
     
     last_checkpoint = None
     if os.path.isdir(training_args.output_dir):
