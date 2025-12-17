@@ -55,8 +55,13 @@ class TevatronCovDistilTrainer(TevatronTrainer):
             for idx in range(batch_size):
                 n_sq = num_subqueries[idx]
                 scores = sq_reps[offset: (offset+n_sq)] @ p_block_reps[idx].T # (m, h) x (n, h)
-                # NOTE: aggregation strategy
-                teacher_scores[idx] = torch.logsumexp(scores, dim=0) # (m, n) --> (n,)
+                # NOTE: aggregation strategy # TODO: maybe rank fusion?
+                if self.args.aggregation_strategy == 'logsumexp': 
+                    teacher_scores[idx] = torch.logsumexp(scores, dim=0) # (m, n) --> (n,)
+                elif self.args.aggregation_strategy == 'max': 
+                    teacher_scores[idx] = torch.max(scores, dim=0) # (m, n) --> (n,)
+                else:
+                    teacher_scores[idx] = torch.sum(scores, dim=0) # (m, n) --> (n,)
                 offset += n_sq
 
             # print('teacher_scores', teacher_scores.shape)
@@ -83,8 +88,10 @@ class TevatronCovDistilTrainer(TevatronTrainer):
             ) * self._dist_loss_scale_factor
 
             # loss
-            self.log({"train/constrastive": loss_rel, "train/covdistil": loss_distil})
-            return loss_rel + loss_distil * 0.5
+            self.log({"train/rel-constrast": loss_rel.item(), 
+                      "train/cov-distil": loss_distil.item() * self.args.distil_lambda})
+            loss = loss_rel + loss_distil * self.args.distil_lambda
+            return loss
         else:
             query, passage = inputs['inputs'] # Hacky workaround for `prediction_step`
             outputs = model(query=query, passage=passage)
