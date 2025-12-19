@@ -11,13 +11,14 @@ from transformers.trainer_utils import get_last_checkpoint
 
 from tevatron.retriever.arguments import ModelArguments, DataArguments, \
     TevatronTrainingArguments as TrainingArguments
-
 from tevatron.retriever.modeling import DenseModel
 
 from tevatron.retriever.dataset_dev import CovDistilTrainDataset
 from tevatron.retriever.collator_dev import CovDistilTrainCollator
+from tevatron.retriever.collator import EncodeCollator
 from tevatron.retriever.trainer_dev import TevatronCovDistilTrainer as Trainer
 
+from tevatron.retriever.callback.nanobeir_eval import Validator
 logger = logging.getLogger(__name__)
 
 
@@ -61,6 +62,7 @@ def main():
 
     set_seed(training_args.seed)
 
+    # Load tokenizer and model
     tokenizer = AutoTokenizer.from_pretrained(
         model_args.tokenizer_name if model_args.tokenizer_name else model_args.model_name_or_path,
         cache_dir=model_args.cache_dir,
@@ -73,7 +75,7 @@ def main():
         tokenizer.padding_side = 'right'
     else:
         tokenizer.padding_side = 'left'
-    
+
     if training_args.bf16:
         torch_dtype = torch.bfloat16
     elif training_args.fp16:
@@ -88,15 +90,14 @@ def main():
         torch_dtype=torch_dtype,
         attn_implementation=model_args.attn_implementation,
     )
-        # dtype=torch_dtype,
 
     # TODO: see if we want to load from HF as well, then we can use `dataset_name`
     # NOTE: the data_args.dataset_config becomes the name of subset
-    trainer_cls = Trainer
     train_dataset = CovDistilTrainDataset(data_args)
     collator = CovDistilTrainCollator(data_args, tokenizer)
     eval_dataset = None
 
+    trainer_cls = Trainer
     trainer = trainer_cls(
         model=model,
         args=training_args,
@@ -105,7 +106,10 @@ def main():
         data_collator=collator
     )
 
-    # TODO: make this easier to understand
+    encode_collator = EncodeCollator(data_args=data_args, tokenizer=tokenizer)
+    # TODO: integrate the validator better
+    trainer.set_validator(Validator(encode_collator, 512))
+
     train_dataset.set_trainer(trainer)
     
     last_checkpoint = None

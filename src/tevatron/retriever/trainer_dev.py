@@ -12,12 +12,13 @@ from tevatron.retriever.trainer import TevatronTrainer
 import logging
 logger = logging.getLogger(__name__)
 
-
+# TODO: see if we can use all the in-batch negative when detaching the teacher scores.
 class TevatronCovDistilTrainer(TevatronTrainer):
 
     def compute_loss(self, model, inputs, return_outputs=False, num_items_in_batch=None, return_loss=None):
         if isinstance(inputs, dict) is False:
             query, passage, subquery, num_subqueries = inputs
+            num_subqueries = torch.tensor(num_subqueries, device=query['input_ids'].device)
 
             # get shape/sizes
             group_size = passage['input_ids'].size(0) // query['input_ids'].size(0)
@@ -26,7 +27,6 @@ class TevatronCovDistilTrainer(TevatronTrainer):
             # standard forward passing (already gathered scores and reps)
             output = model(query=query, passage=passage)
             loss_rel, student_scores = output.loss, output.scores
-            p_block_reps = output.p_reps.view(-1, group_size, output.p_reps.size(-1))
             batch_size = student_scores.size(0)
             # print('student_scores', student_scores.shape)
             # print('p_block_reps', p_block_reps.shape)
@@ -46,28 +46,49 @@ class TevatronCovDistilTrainer(TevatronTrainer):
 
             # print('sq_reps', sq_reps.shape)
             # print('num_subqueries', num_subqueries)
-            # calcuate teacher scores
-            teacher_scores = torch.full(
-                (batch_size, group_size), -float("inf"), device=student_scores.device
-            )
 
-            offset = 0
-            for idx in range(batch_size):
-                n_sq = num_subqueries[idx]
-                scores = sq_reps[offset: (offset+n_sq)] @ p_block_reps[idx].T # (m, h) x (n, h)
-                # NOTE: aggregation strategy # TODO: maybe rank fusion?
-                if self.args.aggregation_strategy == 'logsumexp': 
-                    teacher_scores[idx] = torch.logsumexp(scores, dim=0) # (m, n) --> (n,)
-                elif self.args.aggregation_strategy == 'max': 
-                    teacher_scores[idx] = torch.max(scores, dim=0) # (m, n) --> (n,)
-                else:
-                    teacher_scores[idx] = torch.sum(scores, dim=0) # (m, n) --> (n,)
-                offset += n_sq
-
-            # print('teacher_scores', teacher_scores.shape)
             # calculate local covdistillation
-            student_scores_local = student_scores.view(batch_size, batch_size, group_size)
-            student_scores_local = student_scores_local.diagonal(dim1=0, dim2=1).transpose(0, 1)
+            if self.args.cross_device_groups is False:
+                p_block_reps = output.p_reps.view(-1, group_size, output.p_reps.size(-1)) # (B, N, H)
+                teacher_scores = torch.full((batch_size, group_size), float(0.0), device=student_scores.device)
+                offset = 0
+                for idx in range(batch_size):
+                    n_sq = num_subqueries[idx]
+                    scores = sq_reps[offset: (offset+n_sq)] @ p_block_reps[idx].T # (m, h) x (n, h)
+                    # NOTE: aggregation strategy # TODO: maybe rank fusion?
+                    if self.args.aggregation_strategy == 'logsumexp': 
+                        teacher_scores[idx] = torch.logsumexp(scores, dim=0) # (m, n) --> (n,)
+                    elif self.args.aggregation_strategy == 'max': 
+                        teacher_scores[idx] = torch.max(scores, dim=0).values # (m, n) --> (n,)
+                    else:
+                        teacher_scores[idx] = torch.sum(scores, dim=0) # (m, n) --> (n,)
+                    offset += n_sq
+
+                # have to resahpe the student without in-batch
+                teacher_scores = teacher_scores.detach()
+                student_scores_local = student_scores.view(batch_size, batch_size, group_size)
+                student_scores_local = student_scores_local.diagonal(dim1=0, dim2=1).transpose(0, 1)
+            else:
+                p_reps = output.p_reps
+                teacher_scores = torch.empty_like(student_scores)
+                teacher_scores_full = torch.matmul(sq_reps, p_reps.transpose(0, 1)) # (Bm, h) x (BN, h) - (Bm, BN)
+                offset = 0
+                for idx in range(batch_size):
+                    n_sq = num_subqueries[idx]
+                    scores = teacher_scores[offset: (offset+n_sq)]
+                    # NOTE: aggregation strategy # TODO: maybe rank fusion?
+                    if self.args.aggregation_strategy == 'logsumexp': 
+                        teacher_scores[idx] = torch.logsumexp(scores, dim=0) # (m, n) --> (n,)
+                    elif self.args.aggregation_strategy == 'max': 
+                        teacher_scores[idx] = torch.max(scores, dim=0).values # (m, n) --> (n,)
+                    else:
+                        teacher_scores[idx] = torch.sum(scores, dim=0) # (m, n) --> (n,)
+                    offset += n_sq
+
+                # have to resahpe the student without in-batch
+                teacher_scores = teacher_scores.detach()
+                student_scores_local = student_scores
+
             # NOTE: (B, B, N)...in each query over B, it has B rows of scores. 
             # NOTE: In each row, it represents the distribution of all the groups if docs 
             # NOTE: to assign the "own" docs, we will get student_scores_local[i, i, :] 
@@ -77,8 +98,8 @@ class TevatronCovDistilTrainer(TevatronTrainer):
             T = self.args.distil_temperature
             student_log   = torch.log_softmax(student_scores_local.float() / T, dim=1)
             teacher_probs = torch.softmax(teacher_scores.float()    / T, dim=1)
-            print('student_log', student_log[0])
-            print('teacher_probs', teacher_probs[0])
+            # print('student_log', student_log[0])
+            # print('teacher_probs', teacher_probs[0])
 
             # KL Divergence loss (shapes now [batch, num_labels])
             loss_distil = torch.nn.functional.kl_div(
@@ -88,9 +109,8 @@ class TevatronCovDistilTrainer(TevatronTrainer):
             ) * self._dist_loss_scale_factor
 
             # loss
-            self.log({"train/rel-constrast": loss_rel.item(), 
-                      "train/cov-distil": loss_distil.item() * self.args.distil_lambda})
-            loss = loss_rel + loss_distil * self.args.distil_lambda
+            self.log({"rel-constrast": loss_rel.item(), "cov-distil": loss_distil.item() * self.args.covdistil_lambda})
+            loss = loss_rel + loss_distil * self.args.covdistil_lambda
             return loss
         else:
             query, passage = inputs['inputs'] # Hacky workaround for `prediction_step`

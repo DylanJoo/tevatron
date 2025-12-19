@@ -227,5 +227,8 @@ class TevatronTrainingArguments(TrainingArguments):
         default=0.02,
         metadata={"help": "temperature for distillation"}
     )
-    distil_lambda: float = field(default=0.0, metadata={"help": "learning weight for distillation"})
+
+    # For Coverage distillation
+    covdistil_lambda: float = field(default=0.0, metadata={"help": "learning weight for distillation"})
     aggregation_strategy: str = field(default='sum', metadata={"help": "score pooling for subquery relevance."})
+    cross_device_groups: bool = field(default=False, metadata={"help": "Use the crossdevice negative for distillation as well."})
