@@ -173,6 +173,9 @@ class DataArguments:
     query_prefix: str = field(
         default='', metadata={"help": "prefix or instruction for query"}
     )
+    subquery_prefix: str = field(
+        default='', metadata={"help": "prefix or instruction for subquery"}
+    )
 
     passage_prefix: str = field(
         default='', metadata={"help": "prefix or instruction for passage"}
@@ -232,3 +235,4 @@ class TevatronTrainingArguments(TrainingArguments):
     covdistil_lambda: float = field(default=0.0, metadata={"help": "learning weight for distillation"})
     aggregation_strategy: str = field(default='sum', metadata={"help": "score pooling for subquery relevance."})
     cross_device_groups: bool = field(default=False, metadata={"help": "Use the crossdevice negative for distillation as well."})
+    subquery_constrastive: bool = field(default=False, metadata={"help": "whether or not activate subquery matrix relevance contrastive."})

@@ -74,6 +74,7 @@ class EncoderModel(nn.Module):
                 loss = loss * self.world_size  # counter average weight reduction
 
         # for eval
+        # TODO: remove this or put it somewhere else, as this is already been replaced by rank validator
         # [Dylan] add accuracy calculation for eval
         else:
             scores = self.compute_similarity(q_reps, p_reps).detach()

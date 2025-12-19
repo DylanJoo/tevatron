@@ -65,7 +65,7 @@ class CovDistilTrainDataset(TrainDataset):
             )
 
         # Select subquery and mapping
-        flatten_formatted_subqueries = [self.data_args.query_prefix + sq for sq in subqueries]
+        flatten_formatted_subqueries = [self.data_args.subquery_prefix + sq for sq in subqueries]
 
         return formatted_query, formatted_documents, flatten_formatted_subqueries
 
