@@ -117,11 +117,13 @@ class TevatronCovDistilTrainer(TevatronTrainer):
                 reduction="batchmean"
             ) * self._dist_loss_scale_factor
 
-            # loss summation
+            # loss summation # NOTE: to also monitor the changes when lambda == 0, switch to 1. 
+            # NOTE: but still use zero when calculating loss for FP/BP
+            covdistil_lambda = self.args.covdistil_lambda if self.args.covdistil_lambda != 0 else 1
             self.log({
                 "rel-constrast": loss_rel.item(), 
-                "subrel-constrast": loss_subrel.item() * self.args.covdistil_lambda,
-                "cov-distil": loss_distil.item() * self.args.covdistil_lambda
+                "subrel-constrast": loss_subrel.item() * covdistil_lambda,
+                "cov-distil": loss_distil.item() * covdistil_lambda
             })
             loss = loss_rel + (loss_subrel + loss_distil) * self.args.covdistil_lambda
             return loss
