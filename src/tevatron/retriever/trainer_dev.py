@@ -26,12 +26,12 @@ class TevatronCovDistilTrainer(TevatronTrainer):
             group_size = passage['input_ids'].size(0) // query['input_ids'].size(0)
             local_batch_size = query['input_ids'].size(0)
 
-            # standard forward passing (already gathered scores and reps)
+            # Loss1 -- loss_rel: standard forward passing (already gathered scores and reps)
             output = model(query=query, passage=passage)
             loss_rel, student_scores = output.loss, output.scores
+            p_reps = output.p_reps
             batch_size = student_scores.size(0)
 
-            # forward subquery and calculate relevance individually
             if hasattr(model, 'module'):
                 sq_reps = model.module.encode_query(subquery)
                 temperature = model.module.temperature
@@ -39,13 +39,12 @@ class TevatronCovDistilTrainer(TevatronTrainer):
                 sq_reps = model.encode_query(subquery)
                 temperature = model.temperature
 
-            p_reps = output.p_reps
-
             # NOTE: each rank is going to compute the subquery relevance they have and aggregate them to the specific query
-            teacher_scores_local = torch.zeros(local_batch_size, p_reps.size(0), device=sq_reps.device)
+            teacher_scores_local = torch.ones(local_batch_size, p_reps.size(0), device=sq_reps.device)
             teacher_scores_local_sq = torch.matmul(sq_reps, p_reps.transpose(0, 1))
             sq_offsets = torch.cumsum(torch.cat([num_subqueries.new_zeros(1), num_subqueries]), dim=0)
 
+            assert max(sq_offsets)==teacher_scores_local_sq.size(0), 'Mismatched sizes'
             for idx in range(local_batch_size):
                 sq_start_idx = sq_offsets[idx]
                 sq_end_idx   = sq_offsets[idx+1]
@@ -54,8 +53,6 @@ class TevatronCovDistilTrainer(TevatronTrainer):
                     teacher_scores_local[idx] = torch.sum(scores, dim=0)
                 if self.args.aggregation_strategy=='mean':
                     teacher_scores_local[idx] = torch.mean(scores, dim=0)
-            print('teacher_scores_local (0)', teacher_scores_local[0])
-            print('teacher_scores_local (-1)', teacher_scores_local[-1])
 
             # gather the teacher score 
             if hasattr(model, 'module'):
@@ -65,13 +62,25 @@ class TevatronCovDistilTrainer(TevatronTrainer):
                 if model.is_ddp:
                     teacher_scores = model._dist_gather_tensor(teacher_scores_local)
 
+            #### sanity check
+            if self.state.global_step % 100 == 0:
+                k = 10
+                s_topk = student_scores.topk(k, dim=1).indices
+                t_topk = teacher_scores.topk(k, dim=1).indices
+                overlap = (s_topk == t_topk).float().mean().item()
+                self.log({"overlap": overlap})
 
-            # NOTE: old aggregation
-            # for idx in range(batch_size):
-            #     start = sq_offsets[idx]
-            #     end   = sq_offsets[idx+1]
-            #     scores = teacher_scores_sq[start:end, :]
-            #     teacher_scores[idx] = torch.sum(scores, dim=0) # (m, n) --> (n,)
+                s_probs = torch.softmax(student_scores.float(), dim=1)
+                t_probs = torch.softmax(teacher_scores.float(), dim=1)
+                s_ent = -(s_probs * torch.log(s_probs + 1e-9)).sum(dim=1).mean()
+                t_ent = -(t_probs * torch.log(t_probs + 1e-9)).sum(dim=1).mean()
+                self.log({"student entropy:": s_ent.item()})
+                self.log({"teacher entropy:": t_ent.item()})
+
+                print('student_scores (0)', student_scores[0, :16])
+                print('teacher_scores (0)', teacher_scores[0, :16])
+                print('student_scores (-1)', student_scores[-1, -16:])
+                print('teacher_scores (-1)', teacher_scores[-1, -16:])
 
             ## Loss2: subquery_contrsative
             if self.args.subquery_constrastive:
@@ -88,10 +97,9 @@ class TevatronCovDistilTrainer(TevatronTrainer):
 
             # Loss3: Resahpe the student without in-batch
             teacher_scores = teacher_scores.detach()  # detach for the KD part
-            student_scores_local = student_scores
 
             T = self.args.distil_temperature
-            student_log   = torch.log_softmax(student_scores_local.float() / T, dim=1)
+            student_log   = torch.log_softmax(student_scores.float() / T, dim=1)
             teacher_probs = torch.softmax(teacher_scores.float()    / T, dim=1)
 
             # KL Divergence loss (shapes now [batch, num_labels])
@@ -106,10 +114,12 @@ class TevatronCovDistilTrainer(TevatronTrainer):
             covdistil_lambda = self.args.covdistil_lambda if self.args.covdistil_lambda != 0 else 1
             self.log({
                 "rel-constrast": loss_rel.item(), 
-                "subrel-constrast": loss_subrel.item() * covdistil_lambda,
-                "cov-distil": loss_distil.item() * covdistil_lambda
+                "subrel-constrast": loss_subrel.item(),
+                "cov-distil": loss_distil.item(),
             })
-            loss = loss_rel + (loss_subrel + loss_distil) * self.args.covdistil_lambda
+            loss = loss_rel + \
+                   loss_subrel * self.args.covdistil_lambda,
+                   loss_distil * self.args.covdistil_lambda
             return loss
         else:
             query, passage = inputs['inputs'] # Hacky workaround for `prediction_step`
