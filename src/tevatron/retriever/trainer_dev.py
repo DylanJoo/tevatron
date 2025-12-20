@@ -24,70 +24,54 @@ class TevatronCovDistilTrainer(TevatronTrainer):
 
             # get shape/sizes
             group_size = passage['input_ids'].size(0) // query['input_ids'].size(0)
+            local_batch_size = query['input_ids'].size(0)
 
             # standard forward passing (already gathered scores and reps)
             output = model(query=query, passage=passage)
             loss_rel, student_scores = output.loss, output.scores
             batch_size = student_scores.size(0)
-            # print('student_scores', student_scores.shape)
-            # print('p_block_reps', p_block_reps.shape)
-            # print('batch_size', batch_size)
 
             # forward subquery and calculate relevance individually
             if hasattr(model, 'module'):
                 sq_reps = model.module.encode_query(subquery)
-                if model.module.is_ddp:
-                    sq_reps = model.module._dist_gather_tensor(sq_reps)
-                    num_subqueries = model.module._dist_gather_tensor(num_subqueries)
-                    temperature = model.module.temperature
+                temperature = model.module.temperature
             else:
                 sq_reps = model.encode_query(subquery)
-                if model.is_ddp:
-                    sq_reps = model._dist_gather_tensor(sq_reps)
-                    num_subqueries = model._dist_gather_tensor(num_subqueries)
-                    temperature = model.temperature
-            # print('sq_reps', sq_reps.shape)
-
-            # TODO: make the student score variable consistent across settings
-            # TODO: maybe this condition is no longer needed.
-            # if self.args.cross_device_groups is False:
-                # NOTE: now it is deprecated. This only consider the query-wise document group but not in-batch documents
-                # p_block_reps = output.p_reps.view(-1, group_size, output.p_reps.size(-1)) # (B, N, H)
-                # teacher_scores = torch.full((batch_size, group_size), float(0.0), device=student_scores.device)
-                # offset = 0
-                # for idx in range(batch_size):
-                #     n_sq = num_subqueries[idx]
-                #     scores = sq_reps[offset: (offset+n_sq)] @ p_block_reps[idx].T # (m, h) x (n, h)
-                #     # NOTE: aggregation strategy # TODO: maybe rank fusion?
-                #     teacher_scores[idx] = torch.sum(scores, dim=0) # (m, n) --> (n,)
-                #     offset += n_sq
-                #
-                # # have to resahpe the student without in-batch
-                # teacher_scores = teacher_scores.detach()
-                # student_scores_local = student_scores.view(batch_size, batch_size, group_size)
-                # student_scores_local = student_scores_local.diagonal(dim1=0, dim2=1).transpose(0, 1)
-
-                # NOTE: (B, B, N)...in each query over B, it has B rows of scores. 
-                # NOTE: In each row, it represents the distribution of all the groups if docs 
-                # NOTE: to assign the "own" docs, we will get student_scores_local[i, i, :] 
-                # NOTE: Finally, do the transpose (N, B) --> (B, N)
-            # else:
+                temperature = model.temperature
 
             p_reps = output.p_reps
-            teacher_scores = torch.empty_like(student_scores)
-            teacher_scores_full = torch.matmul(sq_reps, p_reps.transpose(0, 1)) # (Bm, h) x (BN, h) - (Bm, BN)
-            offset = 0
-            # TODO: maybe rank fusion?
-            for idx in range(batch_size):
-                n_sq = num_subqueries[idx]
-                scores = teacher_scores_full[offset: (offset+n_sq)]
-                if self.args.aggregation_strategy == 'logsumexp': 
-                    teacher_scores[idx] = torch.logsumexp(scores, dim=0) # (m, n) --> (n,)
-                elif self.args.aggregation_strategy == 'max': 
-                    teacher_scores[idx] = torch.max(scores, dim=0).values # (m, n) --> (n,)
-                else:
-                    teacher_scores[idx] = torch.sum(scores, dim=0) # (m, n) --> (n,)
-                offset += n_sq
+
+            # NOTE: each rank is going to compute the subquery relevance they have and aggregate them to the specific query
+            teacher_scores_local = torch.zeros(local_batch_size, p_reps.size(0), device=sq_reps.device)
+            teacher_scores_local_sq = torch.matmul(sq_reps, p_reps.transpose(0, 1))
+            sq_offsets = torch.cumsum(torch.cat([num_subqueries.new_zeros(1), num_subqueries]), dim=0)
+
+            for idx in range(local_batch_size):
+                sq_start_idx = sq_offsets[idx]
+                sq_end_idx   = sq_offsets[idx+1]
+                scores = teacher_scores_local_sq[sq_start_idx: sq_end_idx]
+                if self.args.aggregation_strategy=='sum':
+                    teacher_scores_local[idx] = torch.sum(scores, dim=0)
+                if self.args.aggregation_strategy=='mean':
+                    teacher_scores_local[idx] = torch.mean(scores, dim=0)
+            print('teacher_scores_local (0)', teacher_scores_local[0])
+            print('teacher_scores_local (-1)', teacher_scores_local[-1])
+
+            # gather the teacher score 
+            if hasattr(model, 'module'):
+                if model.module.is_ddp:
+                    teacher_scores = model.module._dist_gather_tensor(teacher_scores_local)
+            else:
+                if model.is_ddp:
+                    teacher_scores = model._dist_gather_tensor(teacher_scores_local)
+
+
+            # NOTE: old aggregation
+            # for idx in range(batch_size):
+            #     start = sq_offsets[idx]
+            #     end   = sq_offsets[idx+1]
+            #     scores = teacher_scores_sq[start:end, :]
+            #     teacher_scores[idx] = torch.sum(scores, dim=0) # (m, n) --> (n,)
 
             ## Loss2: subquery_contrsative
             if self.args.subquery_constrastive:
