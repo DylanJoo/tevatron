@@ -233,6 +233,7 @@ class TevatronTrainingArguments(TrainingArguments):
 
     # For Coverage distillation
     covdistil_lambda: float = field(default=0.0, metadata={"help": "learning weight for distillation"})
+    sq_contrastive_lambda: Optional[float] = field(default=0.0, metadata={"help": "learning weight for sq_constrative"})
     aggregation_strategy: str = field(default='sum', metadata={"help": "score pooling for subquery relevance."})
-    cross_device_groups: bool = field(default=False, metadata={"help": "Use the crossdevice negative for distillation as well."})
     subquery_constrastive: bool = field(default=False, metadata={"help": "whether or not activate subquery matrix relevance contrastive."})
+    covdistil_method: str = field(default='KLD', metadata={"help": "what kinds of distillation logics to use, supporting KLD and MarginMSE."})

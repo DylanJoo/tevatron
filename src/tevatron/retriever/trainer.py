@@ -148,8 +148,8 @@ class DistilTevatronTrainer(TevatronTrainer):
                     reranker_labels = model._dist_gather_tensor(reranker_labels)
             
             # Derive student_scores [batch, num_labels]
-            batch_size, total_passages = scores.size()
-            num_labels = reranker_labels.size(1)
+            batch_size, total_passages = scores.size() # (B, nB)
+            num_labels = reranker_labels.size(1) # (B*nB)
             start_idxs = torch.arange(0, batch_size * num_labels, num_labels, device=scores.device)
             idx_matrix = start_idxs.view(-1, 1) + torch.arange(num_labels, device=scores.device)
             student_scores = scores.gather(1, idx_matrix)

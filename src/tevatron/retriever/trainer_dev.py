@@ -13,8 +13,6 @@ from tevatron.retriever.trainer import TevatronTrainer
 import logging
 logger = logging.getLogger(__name__)
 
-# TODO: see if we can use all the in-batch negative when detaching the teacher scores.
-# TODO: remove the debugging print out
 class TevatronCovDistilTrainer(TevatronTrainer):
 
     def compute_loss(self, model, inputs, return_outputs=False, num_items_in_batch=None, return_loss=None):
@@ -70,17 +68,21 @@ class TevatronCovDistilTrainer(TevatronTrainer):
                 overlap = (s_topk == t_topk).float().mean().item()
                 self.log({"overlap": overlap})
 
-                s_probs = torch.softmax(student_scores.float(), dim=1)
-                t_probs = torch.softmax(teacher_scores.float(), dim=1)
-                s_ent = -(s_probs * torch.log(s_probs + 1e-9)).sum(dim=1).mean()
-                t_ent = -(t_probs * torch.log(t_probs + 1e-9)).sum(dim=1).mean()
-                self.log({"student entropy:": s_ent.item()})
-                self.log({"teacher entropy:": t_ent.item()})
+                # margin checks
+                scores_3d = student_scores.view(batch_size, batch_size, -1)
+                scores = torch.diagonal(scores_3d, dim1=0, dim2=1).permute(1, 0)
+                pos_scores = scores[:, 0]
+                neg_scores = scores[:, 1:].max(1).values
+                margin_s = pos_scores - neg_scores
+                self.log({"student margin": margin_s.mean().item()})
 
-                print('student_scores (0)', student_scores[0, :16])
-                print('teacher_scores (0)', teacher_scores[0, :16])
-                print('student_scores (-1)', student_scores[-1, -16:])
-                print('teacher_scores (-1)', teacher_scores[-1, -16:])
+                scores_3d = teacher_scores.view(batch_size, batch_size, -1)
+                scores = torch.diagonal(scores_3d, dim1=0, dim2=1).permute(1, 0)
+                pos_scores = scores[:, 0]
+                neg_scores = scores[:, 1:].max(1).values
+                margin_t = pos_scores - neg_scores
+                self.log({"teacher margin": margin_t.mean().item()})
+                self.log({"margin difference": (margin_t - margin_s).mean().item()})
 
             ## Loss2: subquery_contrsative
             if self.args.subquery_constrastive:
@@ -95,31 +97,37 @@ class TevatronCovDistilTrainer(TevatronTrainer):
             else:
                 loss_subrel = torch.tensor(0.0)
 
-            # Loss3: Resahpe the student without in-batch
-            teacher_scores = teacher_scores.detach()  # detach for the KD part
+            # Loss3 
+            # NOTE old setting considers all the in-batch negative for distillation (deprecated)
+            # NOTE: the new setting considers only own-negative for distillation (like the normal KD)
+            if self.args.covdistil_method == 'KLD':
+                T = self.args.distil_temperature
+                student_log   = torch.log_softmax(student_scores.float() / T, dim=1)
+                teacher_probs = torch.softmax(teacher_scores.float()    / T, dim=1)
+                loss_distil = torch.nn.functional.kl_div(
+                    student_log, teacher_probs,
+                    reduction="batchmean"
+                ) * self._dist_loss_scale_factor
 
-            T = self.args.distil_temperature
-            student_log   = torch.log_softmax(student_scores.float() / T, dim=1)
-            teacher_probs = torch.softmax(teacher_scores.float()    / T, dim=1)
+            elif self.args.covdistil_method == 'MarginMSE':
+                start_idx = torch.arange(0, batch_size * group_size, group_size, device=student_scores.device)
+                idx_matrix = start_idx.view(-1, 1) + torch.arange(group_size, device=student_scores.device)
+                student_scores_group = student_scores.gather(1, idx_matrix)
+                teacher_scores_group = teacher_scores.detach().gather(1, idx_matrix)
 
-            # KL Divergence loss (shapes now [batch, num_labels])
-            loss_distil = torch.nn.functional.kl_div(
-                student_log,
-                teacher_probs,
-                reduction="batchmean"
-            ) * self._dist_loss_scale_factor
+                student_margin = student_scores_group[:, 0:1] - student_scores_group[:, 1:]
+                teacher_margin = teacher_scores_group[:, 0:1] - teacher_scores_group[:, 1:]
+                loss_distil = F.mse_loss(student_margin, teacher_margin) * self._dist_loss_scale_factor * 200 
+                # NOTE: scale up to the level of KLD
 
             # loss summation # NOTE: to also monitor the changes when lambda == 0, switch to 1. 
             # NOTE: but still use zero when calculating loss for FP/BP
-            covdistil_lambda = self.args.covdistil_lambda if self.args.covdistil_lambda != 0 else 1
             self.log({
                 "rel-constrast": loss_rel.item(), 
                 "subrel-constrast": loss_subrel.item(),
                 "cov-distil": loss_distil.item(),
             })
-            loss = loss_rel + \
-                   loss_subrel * self.args.covdistil_lambda,
-                   loss_distil * self.args.covdistil_lambda
+            loss = loss_rel + loss_subrel * self.args.sq_contrastive_lambda + loss_distil * self.args.covdistil_lambda
             return loss
         else:
             query, passage = inputs['inputs'] # Hacky workaround for `prediction_step`
