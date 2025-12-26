@@ -19,6 +19,13 @@ class CovDistilTrainCollator:
     data_args: DataArguments
     tokenizer: PreTrainedTokenizer
 
+    def _adjust_query_max_length(self):
+        if self.data_args.query_prefix != "":
+            prefix_tokens = self.tokenizer.encode(self.data_args.query_prefix, add_special_tokens=False)
+            prefix_len = len(prefix_tokens)
+            self.data_args.query_max_len -= prefix_len
+            self.data_args.query_max_len = max(1, self.data_args.query_max_len)
+
     def __call__(self, features: List[Tuple[str, List[str]]]):
         """
         Collate function for training.

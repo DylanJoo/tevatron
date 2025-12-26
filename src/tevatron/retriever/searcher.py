@@ -1,7 +1,7 @@
 import faiss
 import numpy as np
 from tqdm import tqdm
-
+from collections import defaultdict
 
 import logging
 
@@ -19,18 +19,51 @@ class FaissFlatSearcher:
     def search(self, q_reps: np.ndarray, k: int):
         return self.index.search(q_reps, k)
 
-    def batch_search(self, q_reps: np.ndarray, k: int, batch_size: int, quiet: bool=False):
+    def batch_search(self, q_reps: np.ndarray, k: int, batch_size: int, quiet: bool=False, num_views: int = 0):
         num_query = q_reps.shape[0]
         all_scores = []
         all_indices = []
         for start_idx in tqdm(range(0, num_query, batch_size), disable=quiet):
-            nn_scores, nn_indices = self.search(q_reps[start_idx: start_idx + batch_size], k)
-            all_scores.append(nn_scores)
-            all_indices.append(nn_indices)
+            if q_reps.ndim == 2:
+                nn_scores, nn_indices = self.search(q_reps[start_idx: start_idx + batch_size], k)
+                all_scores.append(nn_scores)
+                all_indices.append(nn_indices)
+            else:
+                nn_scores, nn_indices = self.parallel_search(q_reps[start_idx: start_idx + batch_size], k)
+                all_scores.append(nn_scores)
+                all_indices.append(nn_indices)
         all_scores = np.concatenate(all_scores, axis=0)
         all_indices = np.concatenate(all_indices, axis=0)
 
         return all_scores, all_indices
+
+    def parallel_search(self, sq_reps: np.ndarray, k: int):
+        """ The q_reps should be a batch of subqueries.  """
+        batch_size = sq_reps.shape[0]
+        num_subqueries = sq_reps.shape[1]
+        sq_reps_flatten = sq_reps.reshape(-1, sq_reps.shape[-1])
+        nn_scores, nn_indices = self.search(sq_reps_flatten, k)
+
+        batch_indices, batch_scores = [], []
+        for batch_idx in range(batch_size):
+            start = batch_idx * num_subqueries
+            end   = (batch_idx + 1) * num_subqueries
+            batch_nn_scores  = nn_scores[start: end]
+            batch_nn_indices = nn_indices[start: end]
+
+            # score-sum
+            doc2score = defaultdict(float)
+            for score, docid in zip(batch_nn_scores.flatten(), batch_nn_indices.flatten()):
+                doc2score[docid] += score
+
+            # sorted and return the top-k
+            sorted_docs = sorted(doc2score.items(), key=lambda x: x[1], reverse=True)
+            top_docs = sorted_docs[:k] # NOTE: maybe returning more than k is fine (but need to handle numpy matrix)
+
+            batch_scores.append(np.array([s for _, s in top_docs]))
+            batch_indices.append(np.array([d for d, _ in top_docs]))
+
+        return batch_scores, batch_indices
 
 
 class FaissSearcher(FaissFlatSearcher):

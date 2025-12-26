@@ -51,6 +51,8 @@ class TevatronCovDistilTrainer(TevatronTrainer):
                     teacher_scores_local[idx] = torch.sum(scores, dim=0)
                 if self.args.aggregation_strategy=='mean':
                     teacher_scores_local[idx] = torch.mean(scores, dim=0)
+                if self.args.aggregation_strategy=='max':
+                    teacher_scores_local[idx] = torch.max(scores, dim=0).values
 
             # gather the teacher score 
             if hasattr(model, 'module'):
@@ -85,17 +87,14 @@ class TevatronCovDistilTrainer(TevatronTrainer):
                 self.log({"margin difference": (margin_t - margin_s).mean().item()})
 
             ## Loss2: subquery_contrsative
-            if self.args.subquery_constrastive:
-                teacher_scores = teacher_scores.view(batch_size, -1)
-                target = torch.arange(batch_size, device=teacher_scores.device, dtype=torch.long)
-                target = target * group_size
-                loss_subrel = F.cross_entropy(
-                    teacher_scores / temperature, 
-                    target,
-                    reduction='mean'
-                ) * self._dist_loss_scale_factor
-            else:
-                loss_subrel = torch.tensor(0.0)
+            teacher_scores = teacher_scores.view(batch_size, -1)
+            target = torch.arange(batch_size, device=teacher_scores.device, dtype=torch.long)
+            target = target * group_size
+            loss_subrel = F.cross_entropy(
+                teacher_scores / temperature, 
+                target,
+                reduction='mean'
+            ) * self._dist_loss_scale_factor
 
             # Loss3 
             # NOTE old setting considers all the in-batch negative for distillation (deprecated)
@@ -103,7 +102,7 @@ class TevatronCovDistilTrainer(TevatronTrainer):
             if self.args.covdistil_method == 'KLD':
                 T = self.args.distil_temperature
                 student_log   = torch.log_softmax(student_scores.float() / T, dim=1)
-                teacher_probs = torch.softmax(teacher_scores.float()    / T, dim=1)
+                teacher_probs = torch.softmax(teacher_scores.detach().float()    / T, dim=1)
                 loss_distil = torch.nn.functional.kl_div(
                     student_log, teacher_probs,
                     reduction="batchmean"
@@ -127,7 +126,9 @@ class TevatronCovDistilTrainer(TevatronTrainer):
                 "subrel-constrast": loss_subrel.item(),
                 "cov-distil": loss_distil.item(),
             })
-            loss = loss_rel + loss_subrel * self.args.sq_contrastive_lambda + loss_distil * self.args.covdistil_lambda
+            loss = loss_rel * (self.args.contrastive_lambda or 1.0)
+            loss += loss_subrel * self.args.sq_contrastive_lambda 
+            loss += loss_distil * self.args.covdistil_lambda
             return loss
         else:
             query, passage = inputs['inputs'] # Hacky workaround for `prediction_step`

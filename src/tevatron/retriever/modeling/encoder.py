@@ -32,6 +32,8 @@ class EncoderModel(nn.Module):
                  pooling: str = 'cls',
                  normalize: bool = False,
                  temperature: float = 1.0,
+                 num_views: int = 0,
+                 ind_pooling: bool = False,
                  ):
         super().__init__()
         self.config = encoder.config
@@ -39,6 +41,8 @@ class EncoderModel(nn.Module):
         self.pooling = pooling
         self.normalize = normalize
         self.temperature = temperature
+        self.num_views = num_views
+        self.ind_pooling = ind_pooling
         self.cross_entropy = nn.CrossEntropyLoss(reduction='mean')
         self.is_ddp = dist.is_initialized()
         if self.is_ddp:
@@ -46,12 +50,14 @@ class EncoderModel(nn.Module):
             self.world_size = dist.get_world_size()
 
     def forward(self, query: Dict[str, Tensor] = None, passage: Dict[str, Tensor] = None):
-        q_reps = self.encode_query(query) if query else None
+        q_reps = self.encode_query(query, self.num_views, self.ind_pooling) if query else None
         p_reps = self.encode_passage(passage) if passage else None
         logs = {}
 
-        # for inference
+        # for inference #TODO: fix this 
         if q_reps is None or p_reps is None:
+            # if q_reps is not None and q_reps.dim() == 3: # So far, we 
+            #     q_reps = q_reps[:, 0, :]  
             return EncoderOutput(
                 q_reps=q_reps,
                 p_reps=p_reps
@@ -84,36 +90,10 @@ class EncoderModel(nn.Module):
             loss = self.compute_loss(scores / self.temperature, target)
             correct = (pred == target).float()
 
-            # print(f'accuracy', correct)
-            # print(f'pred ({self.process_rank})', pred)
-            # print(f'target ({self.process_rank})', target)
-
             if self.is_ddp:
                 correct = self._dist_gather_tensor(correct)
 
             logs['acc'] = (100 * correct).mean().item()
-
-            # if self.is_ddp:
-            #     q_reps = self._dist_gather_tensor(q_reps) 
-            #     p_reps = self._dist_gather_tensor(p_reps)
-            # scores = self.compute_similarity(q_reps, p_reps).detach() # 2B x 2B
-            #
-            # target = torch.arange(scores.size(0), device=scores.device, dtype=torch.long)
-            # target = target * (p_reps.size(0) // q_reps.size(0))
-            #
-            # loss = self.compute_loss(scores / self.temperature, target).detach()
-            # # if self.is_ddp:
-            # #     loss = loss * self.world_size  # counter average weight reduction
-            #
-            # # NOTE: eval metrics
-
-            ## NOTE: add masking for the in-batch negatives
-            # prob_d = (scores.softmax(dim=-1)).gather(1, target[None, :]).mean().item()
-            # bsz, ssz = scores.size(0), scores.size(1)
-            # mask = torch.arange(bsz).repeat_interleave(ssz // bsz) == torch.arange(bsz).unsqueeze(1)
-            # masked_scores = scores.masked_fill(~mask.to(scores.device), -torch.inf)
-            # prob_d = (masked_scores.softmax(dim=-1)).gather(1, target[None, :])
-            # logs['prob_d+'] = prob_d.mean()
 
         return EncoderOutput(
             loss=loss,
@@ -130,7 +110,12 @@ class EncoderModel(nn.Module):
         raise NotImplementedError('EncoderModel is an abstract class')
 
     def compute_similarity(self, q_reps, p_reps):
-        return torch.matmul(q_reps, p_reps.transpose(0, 1))
+        if q_reps.dim() == 2:
+            return torch.matmul(q_reps, p_reps.transpose(0, 1))
+        else: 
+            scores_multi = torch.matmul(q_reps, p_reps.transpose(0, 1))
+            return scores_multi.mean(dim=1)
+            # return scores_multi.sum(dim=1)
 
     def compute_loss(self, scores, target):
         return self.cross_entropy(scores, target)
@@ -183,14 +168,18 @@ class EncoderModel(nn.Module):
                 encoder=lora_model,
                 pooling=model_args.pooling,
                 normalize=model_args.normalize,
-                temperature=model_args.temperature
+                temperature=model_args.temperature,
+                num_views=model_args.num_views,
+                ind_pooling=model_args.ind_pooling
             )
         else:
             model = cls(
                 encoder=base_model,
                 pooling=model_args.pooling,
                 normalize=model_args.normalize,
-                temperature=model_args.temperature
+                temperature=model_args.temperature,
+                num_views=model_args.num_views,
+                ind_pooling=model_args.ind_pooling
             )
         return model
 
@@ -200,6 +189,8 @@ class EncoderModel(nn.Module):
              pooling: str = 'cls',
              normalize: bool = False,
              lora_name_or_path: str = None,
+             num_views: int = 0,
+             ind_pooling: bool = False,
              **hf_kwargs):
         print("kwargs for model loading", hf_kwargs)
         base_model = cls.TRANSFORMER_CLS.from_pretrained(model_name_or_path, **hf_kwargs)
@@ -212,13 +203,17 @@ class EncoderModel(nn.Module):
             model = cls(
                 encoder=lora_model,
                 pooling=pooling,
-                normalize=normalize
+                normalize=normalize,
+                num_views=num_views,
+                ind_pooling=ind_pooling
             )
         else:
             model = cls(
                 encoder=base_model,
                 pooling=pooling,
-                normalize=normalize
+                normalize=normalize,
+                num_views=num_views,
+                ind_pooling=ind_pooling
             )
         return model
 

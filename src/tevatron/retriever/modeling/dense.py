@@ -8,10 +8,43 @@ logger = logging.getLogger(__name__)
 
 class DenseModel(EncoderModel):
 
-    def encode_query(self, qry):
+    def encode_query(self, qry, num_views=0, ind_pooling=False):
         query_hidden_states = self.encoder(**qry, return_dict=True)
         query_hidden_states = query_hidden_states.last_hidden_state
-        return self._pooling(query_hidden_states, qry['attention_mask'])
+        if num_views == 0:
+            return self._pooling(query_hidden_states, qry['attention_mask'])
+
+        masked_hiddens = query_hidden_states.masked_fill(~qry['attention_mask'][..., None].bool(), 0.0)
+        query_mask = qry['attention_mask'].clone()
+
+        ## NOTE: View tokens in the begining. 
+        ## Tempalte: [CLS]search_query: [unused0]....[unusedn] {q}[SEP][PAD]...
+        ## Tempalte: [PAD]...[CLS]search_query: {q}[SEP][unused0]....[unusedn][SEP]
+
+        ### NOTE: incremental pooling
+        if ind_pooling:
+            query_sum = (masked_hiddens * query_mask[..., None]).sum(dim=1)
+            query_len = query_mask.sum(dim=1)
+            views_sum = masked_hiddens[:, 5:(5+num_views), :] # B 5 H
+            views_counts = query_len[..., None] + torch.ones(num_views, device=masked_hiddens.device)[None, ...] # B 5
+            views_reps = query_sum.unsqueeze(1) + views_sum # B 5 H
+            reps = views_reps / views_counts.unsqueeze(-1)
+        else:
+            query_mask[:, 5:(5+num_views)] = False # exclude view tokens
+            query_sum = (masked_hiddens * query_mask[..., None]).sum(dim=1)
+            query_len = query_mask.sum(dim=1)
+            views_sum = (masked_hiddens[:, 5:(5+num_views), :]).cumsum(dim=1) # B 5 H
+            views_counts = query_len[..., None] + torch.arange(1, num_views + 1, device=masked_hiddens.device)[None, ...] # B 5
+            views_reps = query_sum.unsqueeze(1) + views_sum # B 5 H
+            reps = views_reps / views_counts.unsqueeze(-1)
+
+        # query_mask[:, -(num_views+1):] = False
+        # query_reps = (masked_hiddens * query_mask[..., None]).sum(dim=1) / query_mask.sum(dim=1)[..., None]
+        # views_reps = masked_hiddens[:, -(num_views+1):]
+
+        # reps = torch.cat([query_reps.unsqueeze(1), views_reps], dim=1)
+        reps = torch.nn.functional.normalize(reps, p=2, dim=-1)
+        return reps
     
     def encode_passage(self, psg):
         # encode passage is the same as encode query

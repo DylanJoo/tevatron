@@ -20,7 +20,7 @@ logging.basicConfig(
 
 def search_queries(retriever, q_reps, p_lookup, args):
     if args.batch_size > 0:
-        all_scores, all_indices = retriever.batch_search(q_reps, args.depth, args.batch_size, args.quiet)
+        all_scores, all_indices = retriever.batch_search(q_reps, args.depth, args.batch_size, args.quiet, args.num_views)
     else:
         all_scores, all_indices = retriever.search(q_reps, args.depth)
 
@@ -58,6 +58,8 @@ def main():
     parser.add_argument('--save_ranking_to', required=True)
     parser.add_argument('--save_text', action='store_true')
     parser.add_argument('--quiet', action='store_true')
+    # NOTE: number of views for each query
+    parser.add_argument('--num_views', type=int, default=0)
 
     args = parser.parse_args()
 

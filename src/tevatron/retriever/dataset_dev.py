@@ -32,7 +32,7 @@ class CovDistilTrainDataset(TrainDataset):
         query_image = group.get('query_image', None)
         query_video = group.get('query_video', None)
         query_audio = group.get('query_audio', None)
-        formatted_query = (self.data_args.query_prefix + query_text,
+        formatted_query = (self.data_args.query_prefix + query_text + self.data_args.query_postfix,
                            query_image, query_video, query_audio)
 
         formatted_documents = []
