@@ -25,40 +25,31 @@ class TrainCollator:
         :param features: list of (query, passages) tuples
         :return: tokenized query_ids, passage_ids
         """
-        if self.data_args.pretokenized is False:
-            # NOTE: the standard setting returns list of tuples 
-            all_queries = [f[0] for f in features]
-            all_passages = []
-            for f in features:
-                all_passages.extend(f[1])
-            all_queries = [q[0] for q in all_queries]
-            all_passages = [p[0] for p in all_passages]
-            q_collated = self.tokenizer(
-                all_queries,
-                padding=False, 
-                truncation=True,
-                max_length=self.data_args.query_max_len-1 if self.data_args.append_eos_token else self.data_args.query_max_len,
-                return_attention_mask=False,
-                return_token_type_ids=False,
-                add_special_tokens=True,
-            )
-            d_collated = self.tokenizer(
-                all_passages,
-                padding=False, 
-                truncation=True,
-                max_length=self.data_args.passage_max_len-1 if self.data_args.append_eos_token else self.data_args.passage_max_len,
-                return_attention_mask=False,
-                return_token_type_ids=False,
-                add_special_tokens=True,
-            )
-        else:
-            # NOTE: the query and passage here are pretokenized, 
-            query_max_len = self.data_args.query_max_len-1 if self.data_args.append_eos_token else self.data_args.query_max_len
-            passage_max_len = self.data_args.passage_max_len-1 if self.data_args.append_eos_token else self.data_args.passage_max_len
-            q_collated = {'input_ids': [f['query'][:query_max_len] for f in features]}
-            d_collated = {'input_ids': []}
-            for f in features: # NOTE: a list of passage groups
-                d_collated['input_ids'].extend(f['passage'][:passage_max_len])
+        # NOTE: the standard setting returns list of tuples 
+        all_queries = [f[0] for f in features]
+        all_passages = []
+        for f in features:
+            all_passages.extend(f[1])
+        all_queries = [q[0] for q in all_queries]
+        all_passages = [p[0] for p in all_passages]
+        q_collated = self.tokenizer(
+            all_queries,
+            padding=False, 
+            truncation=True,
+            max_length=self.data_args.query_max_len-1 if self.data_args.append_eos_token else self.data_args.query_max_len,
+            return_attention_mask=False,
+            return_token_type_ids=False,
+            add_special_tokens=True,
+        )
+        d_collated = self.tokenizer(
+            all_passages,
+            padding=False, 
+            truncation=True,
+            max_length=self.data_args.passage_max_len-1 if self.data_args.append_eos_token else self.data_args.passage_max_len,
+            return_attention_mask=False,
+            return_token_type_ids=False,
+            add_special_tokens=True,
+        )
 
         if self.data_args.append_eos_token:
             q_collated['input_ids'] = [q + [self.tokenizer.eos_token_id] for q in q_collated['input_ids']]

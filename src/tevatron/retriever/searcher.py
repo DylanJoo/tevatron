@@ -19,7 +19,7 @@ class FaissFlatSearcher:
     def search(self, q_reps: np.ndarray, k: int):
         return self.index.search(q_reps, k)
 
-    def batch_search(self, q_reps: np.ndarray, k: int, batch_size: int, quiet: bool=False, num_views: int = 0):
+    def batch_search(self, q_reps: np.ndarray, k: int, batch_size: int, quiet: bool=False, aggregation_strategy: str='sum'):
         num_query = q_reps.shape[0]
         all_scores = []
         all_indices = []
@@ -29,7 +29,7 @@ class FaissFlatSearcher:
                 all_scores.append(nn_scores)
                 all_indices.append(nn_indices)
             else:
-                nn_scores, nn_indices = self.parallel_search(q_reps[start_idx: start_idx + batch_size], k)
+                nn_scores, nn_indices = self.parallel_search(q_reps[start_idx: start_idx + batch_size], k, aggregation_strategy)
                 all_scores.append(nn_scores)
                 all_indices.append(nn_indices)
         all_scores = np.concatenate(all_scores, axis=0)
@@ -37,12 +37,13 @@ class FaissFlatSearcher:
 
         return all_scores, all_indices
 
-    def parallel_search(self, sq_reps: np.ndarray, k: int):
+    def parallel_search(self, sq_reps: np.ndarray, k: int, aggregation_strategy: str):
         """ The q_reps should be a batch of subqueries.  """
         batch_size = sq_reps.shape[0]
         num_subqueries = sq_reps.shape[1]
         sq_reps_flatten = sq_reps.reshape(-1, sq_reps.shape[-1])
         nn_scores, nn_indices = self.search(sq_reps_flatten, k)
+        num_docs = 0
 
         batch_indices, batch_scores = [], []
         for batch_idx in range(batch_size):
@@ -51,18 +52,23 @@ class FaissFlatSearcher:
             batch_nn_scores  = nn_scores[start: end]
             batch_nn_indices = nn_indices[start: end]
 
-            # score-sum
+            # score-sum or score-max
             doc2score = defaultdict(float)
             for score, docid in zip(batch_nn_scores.flatten(), batch_nn_indices.flatten()):
-                doc2score[docid] += score
+                if aggregation_strategy == 'max':
+                    doc2score[docid] = max(score, doc2score[docid])
+                else:
+                    doc2score[docid] += score
 
             # sorted and return the top-k
             sorted_docs = sorted(doc2score.items(), key=lambda x: x[1], reverse=True)
             top_docs = sorted_docs[:k] # NOTE: maybe returning more than k is fine (but need to handle numpy matrix)
+            num_docs += len(sorted_docs)
 
             batch_scores.append(np.array([s for _, s in top_docs]))
             batch_indices.append(np.array([d for d, _ in top_docs]))
 
+        print('Average # retrieved documents:', num_docs / batch_size)
         return batch_scores, batch_indices
 
 

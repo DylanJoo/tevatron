@@ -83,9 +83,9 @@ class ModelArguments:
         default=0,
         metadata={"help": "number of views in the query representation. If 0, it is single vector pooling."}
     )
-    ind_pooling: bool = field(
+    cumulative_pooling: bool = field(
         default=False,
-        metadata={"help": "whether or not use the accumulated view embeddings. e.g., view3 = view1+view2+view3+main"}
+        metadata={"help": "whether or not pool with cumulative views."}
     )
 
 
@@ -97,7 +97,7 @@ class DataArguments:
     eval_group_size: int = field(default=32, metadata={"help": "number of passages used to eval for each query"})
     eval_corpus_name: str = field(default=None, metadata={"help": "the corpus name for docid in eval set, None would use `corpus_name`"})
     exclude_title: bool = field(default=False, metadata={"help": "append title in the begining."})
-    num_unused_tokens: int = field(default=0, metadata={"help": "number of unused tokens."})
+    request_as_query: bool = field(default=False, metadata={"help": "replace query with long request."})
 
     # [Dylan] added for multi-aspect retrieval
     concat_query: bool = field(default=False, metadata={"help": "whether or not concat the original query in the beginging."})
@@ -253,3 +253,5 @@ class TevatronTrainingArguments(TrainingArguments):
     aggregation_strategy: str = field(default='sum', metadata={"help": "score pooling for subquery relevance."})
     # subquery_constrastive: bool = field(default=False, metadata={"help": "whether or not activate subquery matrix relevance contrastive."})
     covdistil_method: str = field(default='KLD', metadata={"help": "what kinds of distillation logics to use, supporting KLD and MarginMSE."})
+    view_orthogonalize_method: str = field(default=None, metadata={"help": "what kinds of orthogonalization"})
+    view_orthogonalize_lambda: float = field(default=0.0, metadata={"help": "learning weight for orthogonalization"})

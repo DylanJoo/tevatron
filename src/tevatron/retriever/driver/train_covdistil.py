@@ -18,7 +18,8 @@ from tevatron.retriever.collator_dev import CovDistilTrainCollator
 from tevatron.retriever.collator import EncodeCollator
 from tevatron.retriever.trainer_dev import TevatronCovDistilTrainer as Trainer
 
-from tevatron.retriever.callback.nanobeir_eval import Validator
+# from tevatron.retriever.callback.nanobeir_eval import Validator
+from tevatron.retriever.callback.cruxmds_eval import Validator
 logger = logging.getLogger(__name__)
 
 

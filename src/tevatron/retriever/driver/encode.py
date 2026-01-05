@@ -70,7 +70,7 @@ def main():
         normalize=model_args.normalize,
         lora_name_or_path=model_args.lora_name_or_path,
         num_views=model_args.num_views,
-        ind_pooling=model_args.ind_pooling,
+        cumulative_pooling=model_args.cumulative_pooling,
         cache_dir=model_args.cache_dir,
         torch_dtype=torch_dtype,
         attn_implementation=model_args.attn_implementation,

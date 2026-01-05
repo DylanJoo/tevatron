@@ -1,16 +1,18 @@
-import ir_measures
-from ir_measures import nDCG 
-import ir_datasets
 from datasets import load_dataset
 import torch
 import numpy as np
 from tevatron.retriever.searcher import FaissFlatSearcher
+from crux.evaluation.rac_eval import rac_eval
+from crux.tools import load_run_or_qrel, load_diversity_qrel, load_ratings
+from pathlib import Path
+
+home = Path.home()
 
 class Validator:
 
     def __init__(self, collator, batch_size):
-        self.query_dataset = load_dataset('DylanJHJ/valid-nano-beir')
-        self.document_dataset = load_dataset('DylanJHJ/beir-subset-corpus')
+        self.query_dataset = load_dataset('DylanJHJ/valid-crux-mds')
+        self.document_dataset = load_dataset('DylanJHJ/crux-mds-corpus')
         self.batch_size = 512
         self.collator = collator
         self.eval_counter = 0
@@ -34,8 +36,8 @@ class Validator:
 
             # Encode documents (batch wise)
             self.collator.encode_is_query = False
-            split_ = split.replace('nano_', '')
-            corpus = {ex['docid']: ex['text'] for ex in self.document_dataset[split_]}
+            corpus = {ex['id']: ex['contents'] for ex in self.document_dataset['train']}
+            corpus.update({ex['id']: ex['contents'] for ex in self.document_dataset['test']})
 
             for idx, document_ids in enumerate(candidates):
                 features = [(docid, corpus[docid], None) for docid in document_ids]
@@ -45,16 +47,36 @@ class Validator:
                     doc_embs = model_output.p_reps.cpu().detach().numpy()
                     scores = query_embs[idx] @ doc_embs.T # (N H) or (H) x (H D) = (N, D) or (D)
                     if scores.ndim == 2: # only check one qid
-                        scores = scores.sum(axis=0)
+                        scores = scores.mean(axis=0)
 
                 # assign scores
                 qid = idx2qid[idx]
                 run[qid] = { docid: float(s) for docid, s in zip(document_ids, scores) }
 
             # evaluation
-            irds_tag = split.replace("_", "-").replace(".", "/")
-            qrels = ir_datasets.load(irds_tag).qrels_dict()
-            all_results[split] = ir_measures.calc_aggregate([nDCG@10], qrels=qrels, run=run)[nDCG@10]
-            # print({f"eval/{split}": all_results[split]})
+            qrel = load_run_or_qrel(
+                f'{home}/datasets/crux/crux-mds-{split}/qrels/div_qrels-tau3.txt', 
+                threshold=1
+            )
+            div_qrel = load_diversity_qrel(
+                f'{home}/datasets/crux/crux-mds-{split}/qrels/div_qrels-tau3.txt'
+            )
+            qrel = {k: v for k, v in qrel.items() if k in run}
+            div_qrel = div_qrel[div_qrel['query_id'].isin(run.keys())]
+
+            ratings = load_ratings(f'{home}/datasets/crux/crux-mds-{split}/judge')
+            outputs = rac_eval(
+                run=run,
+                qrel=qrel, 
+                div_qrel=div_qrel,
+                tau=3,
+                cutoff=10,
+                judge=ratings,
+                filter_by_oracle=True
+            )
+            for key, values in outputs.items():
+                avg_value = np.mean(values)
+                all_results[f"{split}-{key}"] = avg_value
+
         return all_results
 

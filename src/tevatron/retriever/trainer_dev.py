@@ -1,6 +1,8 @@
 import os
 from typing import Optional
+import wandb
 
+import numpy as np
 import torch
 import torch.nn.functional as F
 from torch.utils.data import DataLoader
@@ -9,11 +11,31 @@ from transformers.trainer import Trainer, TRAINING_ARGS_NAME
 import torch.distributed as dist
 from .modeling import EncoderModel
 from tevatron.retriever.trainer import TevatronTrainer
+import matplotlib.pyplot as plt
+from transformers.integrations import WandbCallback
 
 import logging
 logger = logging.getLogger(__name__)
 
 class TevatronCovDistilTrainer(TevatronTrainer):
+
+    def compute_orthogonal_loss(self, views):
+        if views.dim() != 3:
+            return torch.tensor(0)
+
+        B, V, H = views.shape
+        sim = torch.bmm(views, views.transpose(1, 2))
+        eye = torch.eye(V, device=views.device).unsqueeze(0)
+        num_pairs = B * V * (V - 1)
+
+        if self.args.view_orthogonalize_method == 'mse':
+            loss = ((sim - eye) ** 2).sum() / num_pairs
+        elif self.args.view_orthogonalize_method == 'abs':
+            loss = torch.abs(sim * (1 - eye)).sum() / num_pairs
+        else:
+            sim = sim * (1 - eye)
+            loss = (sim ** 2).sum() / num_pairs
+        return loss * self._dist_loss_scale_factor
 
     def compute_loss(self, model, inputs, return_outputs=False, num_items_in_batch=None, return_loss=None):
         if isinstance(inputs, dict) is False:
@@ -28,7 +50,11 @@ class TevatronCovDistilTrainer(TevatronTrainer):
             output = model(query=query, passage=passage)
             loss_rel, student_scores = output.loss, output.scores
             p_reps = output.p_reps
+            q_reps = output.q_reps # this will be multi-view
             batch_size = student_scores.size(0)
+
+            # Loss4 -- Orthogonal loss
+            loss_orthogonal = self.compute_orthogonal_loss(q_reps)
 
             if hasattr(model, 'module'):
                 sq_reps = model.module.encode_query(subquery)
@@ -38,7 +64,7 @@ class TevatronCovDistilTrainer(TevatronTrainer):
                 temperature = model.temperature
 
             # NOTE: each rank is going to compute the subquery relevance they have and aggregate them to the specific query
-            teacher_scores_local = torch.ones(local_batch_size, p_reps.size(0), device=sq_reps.device)
+            teacher_scores_local = torch.zeros(local_batch_size, p_reps.size(0), device=sq_reps.device)
             teacher_scores_local_sq = torch.matmul(sq_reps, p_reps.transpose(0, 1))
             sq_offsets = torch.cumsum(torch.cat([num_subqueries.new_zeros(1), num_subqueries]), dim=0)
 
@@ -47,12 +73,10 @@ class TevatronCovDistilTrainer(TevatronTrainer):
                 sq_start_idx = sq_offsets[idx]
                 sq_end_idx   = sq_offsets[idx+1]
                 scores = teacher_scores_local_sq[sq_start_idx: sq_end_idx]
-                if self.args.aggregation_strategy=='sum':
-                    teacher_scores_local[idx] = torch.sum(scores, dim=0)
-                if self.args.aggregation_strategy=='mean':
-                    teacher_scores_local[idx] = torch.mean(scores, dim=0)
                 if self.args.aggregation_strategy=='max':
                     teacher_scores_local[idx] = torch.max(scores, dim=0).values
+                else:
+                    teacher_scores_local[idx] = torch.mean(scores, dim=0)
 
             # gather the teacher score 
             if hasattr(model, 'module'):
@@ -64,6 +88,23 @@ class TevatronCovDistilTrainer(TevatronTrainer):
 
             #### sanity check
             if self.state.global_step % 100 == 0:
+                # view similarity check 
+                if q_reps.dim() == 3:
+                    q_reps_ = q_reps.detach()
+                    sim_mat = torch.bmm(q_reps_, q_reps_.transpose(1, 2))  # B, V, V
+                    sim_mat = sim_mat.mean(dim=0).to(torch.float32).cpu().numpy()
+                    np.fill_diagonal(sim_mat, np.nan)
+
+                    fig, ax = plt.subplots(figsize=(4, 4))  
+                    im = ax.imshow(sim_mat, cmap="coolwarm")
+                    fig.colorbar(im, ax=ax)
+
+                    for cb in self.callback_handler.callbacks:
+                        if isinstance(cb, WandbCallback):
+                            control = cb.on_log(self.args, self.state, self.control, logs={"views_heatmap": wandb.Image(fig)})
+                    plt.close(fig)
+
+                # teahcer-student overalp check
                 k = 10
                 s_topk = student_scores.topk(k, dim=1).indices
                 t_topk = teacher_scores.topk(k, dim=1).indices
@@ -125,10 +166,12 @@ class TevatronCovDistilTrainer(TevatronTrainer):
                 "rel-constrast": loss_rel.item(), 
                 "subrel-constrast": loss_subrel.item(),
                 "cov-distil": loss_distil.item(),
+                "view-similarity": loss_orthogonal.item(),
             })
-            loss = loss_rel * (self.args.contrastive_lambda or 1.0)
+            loss = loss_rel * self.args.contrastive_lambda
             loss += loss_subrel * self.args.sq_contrastive_lambda 
             loss += loss_distil * self.args.covdistil_lambda
+            loss += loss_orthogonal * self.args.view_orthogonalize_lambda
             return loss
         else:
             query, passage = inputs['inputs'] # Hacky workaround for `prediction_step`

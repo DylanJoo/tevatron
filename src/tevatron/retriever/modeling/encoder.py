@@ -33,7 +33,8 @@ class EncoderModel(nn.Module):
                  normalize: bool = False,
                  temperature: float = 1.0,
                  num_views: int = 0,
-                 ind_pooling: bool = False,
+                 cumulative_pooling: bool = False,
+                 aggregation_strategy: str = 'mean',
                  ):
         super().__init__()
         self.config = encoder.config
@@ -42,7 +43,8 @@ class EncoderModel(nn.Module):
         self.normalize = normalize
         self.temperature = temperature
         self.num_views = num_views
-        self.ind_pooling = ind_pooling
+        self.cumulative_pooling = cumulative_pooling
+        self.aggregation_strategy = aggregation_strategy
         self.cross_entropy = nn.CrossEntropyLoss(reduction='mean')
         self.is_ddp = dist.is_initialized()
         if self.is_ddp:
@@ -50,7 +52,7 @@ class EncoderModel(nn.Module):
             self.world_size = dist.get_world_size()
 
     def forward(self, query: Dict[str, Tensor] = None, passage: Dict[str, Tensor] = None):
-        q_reps = self.encode_query(query, self.num_views, self.ind_pooling) if query else None
+        q_reps = self.encode_query(query, self.num_views, self.cumulative_pooling) if query else None
         p_reps = self.encode_passage(passage) if passage else None
         logs = {}
 
@@ -114,8 +116,10 @@ class EncoderModel(nn.Module):
             return torch.matmul(q_reps, p_reps.transpose(0, 1))
         else: 
             scores_multi = torch.matmul(q_reps, p_reps.transpose(0, 1))
-            return scores_multi.mean(dim=1)
-            # return scores_multi.sum(dim=1)
+            if self.aggregation_strategy=='max':
+                return scores_multi.max(dim=1).values
+            else:
+                return scores_multi.mean(dim=1)
 
     def compute_loss(self, scores, target):
         return self.cross_entropy(scores, target)
@@ -170,7 +174,8 @@ class EncoderModel(nn.Module):
                 normalize=model_args.normalize,
                 temperature=model_args.temperature,
                 num_views=model_args.num_views,
-                ind_pooling=model_args.ind_pooling
+                cumulative_pooling=model_args.cumulative_pooling,
+                aggregation_strategy=train_args.aggregation_strategy
             )
         else:
             model = cls(
@@ -179,7 +184,8 @@ class EncoderModel(nn.Module):
                 normalize=model_args.normalize,
                 temperature=model_args.temperature,
                 num_views=model_args.num_views,
-                ind_pooling=model_args.ind_pooling
+                cumulative_pooling=model_args.cumulative_pooling,
+                aggregation_strategy=train_args.aggregation_strategy
             )
         return model
 
@@ -190,7 +196,8 @@ class EncoderModel(nn.Module):
              normalize: bool = False,
              lora_name_or_path: str = None,
              num_views: int = 0,
-             ind_pooling: bool = False,
+             cumulative_pooling: bool = False,
+             aggregation_strategy: str = 'mean',
              **hf_kwargs):
         print("kwargs for model loading", hf_kwargs)
         base_model = cls.TRANSFORMER_CLS.from_pretrained(model_name_or_path, **hf_kwargs)
@@ -205,7 +212,8 @@ class EncoderModel(nn.Module):
                 pooling=pooling,
                 normalize=normalize,
                 num_views=num_views,
-                ind_pooling=ind_pooling
+                cumulative_pooling=cumulative_pooling,
+                aggregation_strategy=aggregation_strategy
             )
         else:
             model = cls(
@@ -213,7 +221,8 @@ class EncoderModel(nn.Module):
                 pooling=pooling,
                 normalize=normalize,
                 num_views=num_views,
-                ind_pooling=ind_pooling
+                cumulative_pooling=cumulative_pooling,
+                aggregation_strategy=aggregation_strategy
             )
         return model
 

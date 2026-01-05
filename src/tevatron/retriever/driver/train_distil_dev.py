@@ -69,7 +69,6 @@ def main():
 
     if tokenizer.pad_token_id is None:
         tokenizer.pad_token_id = tokenizer.eos_token_id
-
     if data_args.padding_side == 'right':
         tokenizer.padding_side = 'right'
     else:
@@ -86,15 +85,11 @@ def main():
         model_args,
         training_args,
         cache_dir=model_args.cache_dir,
-        torch_dtype=torch_dtype,
         attn_implementation=model_args.attn_implementation,
+        torch_dtype=torch_dtype,
     )
 
-    # data_args.dataset_name = data_args.dataset_name[0]
-    # data_args.dataset_split = data_args.dataset_split[0]
-    # data_args.corpus_name = data_args.corpus_name[0]
     # Train dataset and collator
-    print(data_args)
     train_dataset = DistilTrainDataset(data_args)
 
     collator = DistilTrainCollator(data_args, tokenizer, torch_dtype)

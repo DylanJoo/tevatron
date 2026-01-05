@@ -91,26 +91,12 @@ def main():
 
     # TODO: see if we want to load from HF as well, then we can use `dataset_name`
     # NOTE: the data_args.dataset_config becomes the name of subset
-    if data_args.pretokenized:
-        from datasets import load_dataset
-        subset_name = model_args.model_name_or_path.split('/')[-1].lower()
-
-        logger.warning(f"Using pre-tokenized dataset: {data_args.dataset_name} with subset {subset_name}")
-        dataset = load_dataset(data_args.dataset_name, subset_name)
-        dataset = dataset.remove_columns(["query", "passage_group"])
-        dataset = dataset.rename_column("query_tokenized", "query")
-        dataset = dataset.rename_column("passage_tokenized", "passage")
-        collator = TrainCollator(data_args, tokenizer)
-        train_dataset = dataset['train']
-        eval_dataset = dataset['eval']
-
-    if data_args.pretokenized is False:
-        train_dataset = TrainDataset(data_args)
-        collator = TrainCollator(data_args, tokenizer)
-        if training_args.do_eval:
-            eval_dataset = QrelDataset(data_args, corpus_name=data_args.eval_corpus_name)
-        else:
-            eval_dataset = None
+    train_dataset = TrainDataset(data_args)
+    collator = TrainCollator(data_args, tokenizer)
+    if training_args.do_eval:
+        eval_dataset = QrelDataset(data_args, corpus_name=data_args.eval_corpus_name)
+    else:
+        eval_dataset = None
 
     trainer_cls = GCTrainer if training_args.grad_cache else Trainer
     trainer = trainer_cls(
@@ -122,10 +108,9 @@ def main():
     )
 
     # TODO: make this easier to understand
-    if data_args.pretokenized is False:
-        train_dataset.set_trainer(trainer)
-        if training_args.do_eval:
-            eval_dataset.set_trainer(trainer)
+    train_dataset.set_trainer(trainer)
+    if training_args.do_eval:
+        eval_dataset.set_trainer(trainer)
     
     last_checkpoint = None
     if os.path.isdir(training_args.output_dir):
