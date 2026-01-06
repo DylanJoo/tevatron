@@ -33,7 +33,7 @@ class EncoderModel(nn.Module):
                  normalize: bool = False,
                  temperature: float = 1.0,
                  num_views: int = 0,
-                 cumulative_pooling: bool = False,
+                 view_pooling: str = 'independent',
                  aggregation_strategy: str = 'mean',
                  ):
         super().__init__()
@@ -43,7 +43,7 @@ class EncoderModel(nn.Module):
         self.normalize = normalize
         self.temperature = temperature
         self.num_views = num_views
-        self.cumulative_pooling = cumulative_pooling
+        self.view_pooling = view_pooling
         self.aggregation_strategy = aggregation_strategy
         self.cross_entropy = nn.CrossEntropyLoss(reduction='mean')
         self.is_ddp = dist.is_initialized()
@@ -52,7 +52,7 @@ class EncoderModel(nn.Module):
             self.world_size = dist.get_world_size()
 
     def forward(self, query: Dict[str, Tensor] = None, passage: Dict[str, Tensor] = None):
-        q_reps = self.encode_query(query, self.num_views, self.cumulative_pooling) if query else None
+        q_reps = self.encode_query(query, self.num_views, self.view_pooling) if query else None
         p_reps = self.encode_passage(passage) if passage else None
         logs = {}
 
@@ -174,7 +174,7 @@ class EncoderModel(nn.Module):
                 normalize=model_args.normalize,
                 temperature=model_args.temperature,
                 num_views=model_args.num_views,
-                cumulative_pooling=model_args.cumulative_pooling,
+                view_pooling=model_args.view_pooling,
                 aggregation_strategy=train_args.aggregation_strategy
             )
         else:
@@ -184,7 +184,7 @@ class EncoderModel(nn.Module):
                 normalize=model_args.normalize,
                 temperature=model_args.temperature,
                 num_views=model_args.num_views,
-                cumulative_pooling=model_args.cumulative_pooling,
+                view_pooling=model_args.view_pooling,
                 aggregation_strategy=train_args.aggregation_strategy
             )
         return model
@@ -196,7 +196,7 @@ class EncoderModel(nn.Module):
              normalize: bool = False,
              lora_name_or_path: str = None,
              num_views: int = 0,
-             cumulative_pooling: bool = False,
+             view_pooling: str = 'independent',
              aggregation_strategy: str = 'mean',
              **hf_kwargs):
         print("kwargs for model loading", hf_kwargs)
@@ -212,7 +212,7 @@ class EncoderModel(nn.Module):
                 pooling=pooling,
                 normalize=normalize,
                 num_views=num_views,
-                cumulative_pooling=cumulative_pooling,
+                view_pooling=view_pooling,
                 aggregation_strategy=aggregation_strategy
             )
         else:
@@ -221,7 +221,7 @@ class EncoderModel(nn.Module):
                 pooling=pooling,
                 normalize=normalize,
                 num_views=num_views,
-                cumulative_pooling=cumulative_pooling,
+                view_pooling=view_pooling,
                 aggregation_strategy=aggregation_strategy
             )
         return model

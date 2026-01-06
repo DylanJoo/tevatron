@@ -83,9 +83,9 @@ class ModelArguments:
         default=0,
         metadata={"help": "number of views in the query representation. If 0, it is single vector pooling."}
     )
-    cumulative_pooling: bool = field(
-        default=False,
-        metadata={"help": "whether or not pool with cumulative views."}
+    view_pooling: str = field(
+        default='independent',
+        metadata={"help": "how to pool the view representation"}
     )
 
 
