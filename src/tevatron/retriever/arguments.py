@@ -78,6 +78,16 @@ class ModelArguments:
         },
     )
 
+    # for muilti-view
+    num_views: int = field(
+        default=0,
+        metadata={"help": "number of views in the query representation. If 0, it is single vector pooling."}
+    )
+    view_pooling: str = field(
+        default='independent',
+        metadata={"help": "how to pool the view representation"}
+    )
+
 
 @dataclass
 class DataArguments:
@@ -87,8 +97,10 @@ class DataArguments:
     eval_group_size: int = field(default=32, metadata={"help": "number of passages used to eval for each query"})
     eval_corpus_name: str = field(default=None, metadata={"help": "the corpus name for docid in eval set, None would use `corpus_name`"})
     exclude_title: bool = field(default=False, metadata={"help": "append title in the begining."})
-    # [Dylan] added for faster training (increase GPU utilization)
-    pretokenized: bool = field(default=False, metadata={"help": "whether or not the dataset is pretokenized"})
+    request_as_query: bool = field(default=False, metadata={"help": "replace query with long request."})
+
+    # [Dylan] added for multi-aspect retrieval
+    concat_query: bool = field(default=False, metadata={"help": "whether or not concat the original query in the beginging."})
 
     dataset_name: str = field(
         default='json', metadata={"help": "huggingface dataset name"}
@@ -173,6 +185,12 @@ class DataArguments:
     query_prefix: str = field(
         default='', metadata={"help": "prefix or instruction for query"}
     )
+    query_postfix: str = field(
+        default='', metadata={"help": "prefix or instruction for query"}
+    )
+    subquery_prefix: str = field(
+        default='', metadata={"help": "prefix or instruction for subquery"}
+    )
 
     passage_prefix: str = field(
         default='', metadata={"help": "prefix or instruction for passage"}
@@ -227,3 +245,13 @@ class TevatronTrainingArguments(TrainingArguments):
         default=0.02,
         metadata={"help": "temperature for distillation"}
     )
+
+    # For Coverage distillation
+    contrastive_lambda: float = field(default=1.0, metadata={"help": "learning weight for original objectives"})
+    covdistil_lambda: float = field(default=0.0, metadata={"help": "learning weight for distillation"})
+    sq_contrastive_lambda: Optional[float] = field(default=0.0, metadata={"help": "learning weight for sq_constrative"})
+    aggregation_strategy: str = field(default='sum', metadata={"help": "score pooling for subquery relevance."})
+    # subquery_constrastive: bool = field(default=False, metadata={"help": "whether or not activate subquery matrix relevance contrastive."})
+    covdistil_method: str = field(default='KLD', metadata={"help": "what kinds of distillation logics to use, supporting KLD and MarginMSE."})
+    view_orthogonalize_method: str = field(default=None, metadata={"help": "what kinds of orthogonalization"})
+    view_orthogonalize_lambda: float = field(default=0.0, metadata={"help": "learning weight for orthogonalization"})

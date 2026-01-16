@@ -17,6 +17,7 @@ class TevatronTrainer(Trainer):
         super(TevatronTrainer, self).__init__(*args, **kwargs)
         self.is_ddp = dist.is_initialized()
         self._dist_loss_scale_factor = dist.get_world_size() if self.is_ddp else 1
+        self.validator = None
 
     def set_validator(self, validator):
         self.validator = validator
@@ -90,7 +91,7 @@ class TevatronTrainer(Trainer):
         return contextlib.nullcontext()
 
     def training_step(self, *args):
-        if self.state.global_step % self.args.eval_steps == 0: 
+        if (self.state.global_step % self.args.eval_steps == 0) and (self.validator):
             self.prediction_step(*args)
         return super(TevatronTrainer, self).training_step(*args) / self._dist_loss_scale_factor
 
@@ -147,8 +148,8 @@ class DistilTevatronTrainer(TevatronTrainer):
                     reranker_labels = model._dist_gather_tensor(reranker_labels)
             
             # Derive student_scores [batch, num_labels]
-            batch_size, total_passages = scores.size()
-            num_labels = reranker_labels.size(1)
+            batch_size, total_passages = scores.size() # (B, nB)
+            num_labels = reranker_labels.size(1) # (B*nB)
             start_idxs = torch.arange(0, batch_size * num_labels, num_labels, device=scores.device)
             idx_matrix = start_idxs.view(-1, 1) + torch.arange(num_labels, device=scores.device)
             student_scores = scores.gather(1, idx_matrix)

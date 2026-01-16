@@ -70,6 +70,18 @@ class TrainDataset(Dataset):
             self.corpus = self.corpus.remove_columns(['title'])
             logger.warning("Title is excluded.")
 
+        # replace query with long request
+        if self.data_args.request_as_query:
+            logger.warning(
+                "Replace query from query_text to request_text" 
+                f"\n(original): {self.train_data[0]['query_text']} "
+                f"\n(replaced): {self.train_data[0]['request_text']} "
+            )
+            self.train_data = self.train_data.map(
+                    lambda x: {"query_text": x["request_text"]},
+                    remove_columns=["request_text"]
+            )
+
     def set_trainer(self, trainer):
         """Sets the trainer for the dataset."""
         self.trainer = trainer
