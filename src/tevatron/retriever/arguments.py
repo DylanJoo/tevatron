@@ -1,6 +1,7 @@
 import os
-from dataclasses import dataclass, field
-from typing import Optional
+import json
+from dataclasses import dataclass, field, asdict
+from typing import Optional, Any
 from transformers import TrainingArguments
 
 
@@ -87,6 +88,10 @@ class ModelArguments:
         default='independent',
         metadata={"help": "how to pool the view representation"}
     )
+    view_start_idx: int = field(
+        default=5,
+        metadata={"help": "number of views in the query representation. If 0, it is single vector pooling."}
+    )
 
 
 @dataclass
@@ -98,6 +103,7 @@ class DataArguments:
     eval_corpus_name: str = field(default=None, metadata={"help": "the corpus name for docid in eval set, None would use `corpus_name`"})
     exclude_title: bool = field(default=False, metadata={"help": "append title in the begining."})
     request_as_query: bool = field(default=False, metadata={"help": "replace query with long request."})
+    train_irrelevant_size: int = field(default=0, metadata={"help": "number of passages used to train for each query"})
 
     # [Dylan] added for multi-aspect retrieval
     concat_query: bool = field(default=False, metadata={"help": "whether or not concat the original query in the beginging."})
@@ -251,7 +257,18 @@ class TevatronTrainingArguments(TrainingArguments):
     covdistil_lambda: float = field(default=0.0, metadata={"help": "learning weight for distillation"})
     sq_contrastive_lambda: Optional[float] = field(default=0.0, metadata={"help": "learning weight for sq_constrative"})
     aggregation_strategy: str = field(default='sum', metadata={"help": "score pooling for subquery relevance."})
-    # subquery_constrastive: bool = field(default=False, metadata={"help": "whether or not activate subquery matrix relevance contrastive."})
     covdistil_method: str = field(default='KLD', metadata={"help": "what kinds of distillation logics to use, supporting KLD and MarginMSE."})
     view_orthogonalize_method: str = field(default=None, metadata={"help": "what kinds of orthogonalization"})
     view_orthogonalize_lambda: float = field(default=0.0, metadata={"help": "learning weight for orthogonalization"})
+    use_crossentropy: float = field(default=1.0, metadata={"help": "use contrastive learning with crossentropy"})
+    use_kld: float = field(default=0.0, metadata={"help": "use kld learning with crossentropy"})
+
+def save_args_to_json(output_path: str, **arg_groups: Any):
+    output = {}
+
+    for name, args in arg_groups.items():
+        output[name] = asdict(args)
+
+    with open(output_path, "w") as f:
+        json.dump(output, f, indent=2, sort_keys=True)
+

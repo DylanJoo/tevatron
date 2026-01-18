@@ -1,5 +1,6 @@
 from datasets import load_dataset
 import torch
+import os
 import numpy as np
 from tevatron.retriever.searcher import FaissFlatSearcher
 from crux.evaluation.rac_eval import rac_eval
@@ -7,6 +8,7 @@ from crux.tools import load_run_or_qrel, load_diversity_qrel, load_ratings
 from pathlib import Path
 
 home = Path.home()
+root_dir = os.environ.get('CRUX_ROOT')
 
 class Validator:
 
@@ -55,16 +57,16 @@ class Validator:
 
             # evaluation
             qrel = load_run_or_qrel(
-                f'{home}/datasets/crux/crux-mds-{split}/qrels/div_qrels-tau3.txt', 
+                f'{root_dir}/crux-mds-{split}/qrels/div_qrels-tau3.txt', 
                 threshold=1
             )
             div_qrel = load_diversity_qrel(
-                f'{home}/datasets/crux/crux-mds-{split}/qrels/div_qrels-tau3.txt'
+                f'{root_dir}/crux-mds-{split}/qrels/div_qrels-tau3.txt'
             )
             qrel = {k: v for k, v in qrel.items() if k in run}
             div_qrel = div_qrel[div_qrel['query_id'].isin(run.keys())]
 
-            ratings = load_ratings(f'{home}/datasets/crux/crux-mds-{split}/judge')
+            ratings = load_ratings(f'{root_dir}/crux-mds-{split}/judge')
             outputs = rac_eval(
                 run=run,
                 qrel=qrel, 
