@@ -51,14 +51,27 @@ class FaissFlatSearcher:
             end   = (batch_idx + 1) * num_subqueries
             batch_nn_scores  = nn_scores[start: end]
             batch_nn_indices = nn_indices[start: end]
+            n = batch_nn_scores.shape[1]
 
             # score-sum or score-max
+            doccounts = defaultdict(int)
             doc2score = defaultdict(float)
-            for score, docid in zip(batch_nn_scores.flatten(), batch_nn_indices.flatten()):
+            for i, (score, docid) in enumerate(zip(batch_nn_scores.flatten(), batch_nn_indices.flatten())):
+                doccounts[docid] += 1
                 if aggregation_strategy == 'max':
                     doc2score[docid] = max(score, doc2score[docid])
+                elif aggregation_strategy == 'rrf':
+                    rank = (i + 1) % n
+                    doc2score[docid] += 1 / (60+rank)
+                elif (aggregation_strategy == 'sum') or (aggregation_strategy == 'mean'):
+                    doc2score[docid] += score
                 else:
                     doc2score[docid] += score
+
+            ## mean over the existed documents
+            if aggregation_strategy == 'mean':
+                for docid in doc2score:
+                    doc2score[docid] = doc2score[docid] / doccounts[docid]
 
             # sorted and return the top-k
             sorted_docs = sorted(doc2score.items(), key=lambda x: x[1], reverse=True)

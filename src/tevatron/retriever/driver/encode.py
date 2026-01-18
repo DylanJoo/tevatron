@@ -74,6 +74,7 @@ def main():
         cache_dir=model_args.cache_dir,
         torch_dtype=torch_dtype,
         attn_implementation=model_args.attn_implementation,
+        view_start_idx=model_args.view_start_idx,
     )
 
     if isinstance(data_args.dataset_name, list):
