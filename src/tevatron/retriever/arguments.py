@@ -90,7 +90,7 @@ class ModelArguments:
     )
     view_start_idx: int = field(
         default=5,
-        metadata={"help": "number of views in the query representation. If 0, it is single vector pooling."}
+        metadata={"help": "0: [CLS], 1: search, 2: _, 3: query, 4: :, 5: [unused0]"}
     )
 
 
