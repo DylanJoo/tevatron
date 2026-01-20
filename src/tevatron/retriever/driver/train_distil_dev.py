@@ -12,12 +12,11 @@ from transformers.trainer_utils import get_last_checkpoint
 from tevatron.retriever.arguments import ModelArguments, DataArguments, \
     TevatronTrainingArguments as TrainingArguments
 from tevatron.retriever.dataset import DistilTrainDataset
-from tevatron.retriever.dataset_dev import QrelDataset
 from tevatron.retriever.collator import DistilTrainCollator, EncodeCollator
 from tevatron.retriever.modeling import DenseModel
 from tevatron.retriever.trainer import DistilTevatronTrainer as DistilTrainer
 
-from tevatron.retriever.callback.nanobeir_eval import Validator
+from tevatron.retriever.callback.crux_eval import Validator
 logger = logging.getLogger(__name__)
 
 
@@ -69,6 +68,7 @@ def main():
 
     if tokenizer.pad_token_id is None:
         tokenizer.pad_token_id = tokenizer.eos_token_id
+    
     if data_args.padding_side == 'right':
         tokenizer.padding_side = 'right'
     else:
@@ -93,27 +93,19 @@ def main():
     train_dataset = DistilTrainDataset(data_args)
 
     collator = DistilTrainCollator(data_args, tokenizer, torch_dtype)
-    if training_args.do_eval:
-        eval_dataset = QrelDataset(data_args, corpus_name=data_args.eval_corpus_name, is_distil=True)
-    else:
-        eval_dataset = None
 
     trainer_cls = DistilTrainer
     trainer = trainer_cls(
         model=model,
         args=training_args,
         train_dataset=train_dataset,
-        eval_dataset=eval_dataset,
         data_collator=collator
     )
 
     encode_collator = EncodeCollator(data_args=data_args, tokenizer=tokenizer)
-    # TODO: integrate the validator better
     trainer.set_validator(Validator(encode_collator, 512))
 
     train_dataset.set_trainer(trainer)
-    if training_args.do_eval:
-        eval_dataset.set_trainer(trainer)
     
     last_checkpoint = None
     if os.path.isdir(training_args.output_dir):

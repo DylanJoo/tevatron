@@ -132,6 +132,40 @@ class TrainDataset(Dataset):
         epoch = int(self.trainer.state.epoch) if self.trainer else 0
         _hashed_seed = hash(item + self.trainer.args.seed) if self.trainer else 0
 
+        # Handling the legacy format with 'positive_passages'
+        if 'positive_passages' in group:
+            query_text = group['query']
+            query_image = query_video = query_audio = None
+            formatted_query = (self.data_args.query_prefix + query_text,
+                               query_image, query_video, query_audio)
+
+            formatted_documents = []
+            # Select positive document
+            selected_positive = group['positive_passages'][(_hashed_seed + epoch) % len(group['positive_passages'])]
+            positive_text = (selected_positive['title'] + ' ' + selected_positive['text']
+                             if 'title' in selected_positive else selected_positive['text'])
+            formatted_documents.append((self.data_args.passage_prefix + positive_text, None, None, None))
+
+            # Select negative documents
+            negative_size = self.data_args.train_group_size - 1
+            if len(group['negative_passages']) < negative_size:
+                selected_negatives = random.choices(group['negative_passages'], k=negative_size)
+            elif self.data_args.train_group_size == 1:
+                selected_negatives = []
+            else:
+                offset = epoch * negative_size % len(group['negative_passages'])
+                selected_negatives = list(group['negative_passages'])
+                random.Random(_hashed_seed).shuffle(selected_negatives)
+                selected_negatives = selected_negatives * 2
+                selected_negatives = selected_negatives[offset: offset + negative_size]
+
+            for negative in selected_negatives:
+                negative_text = (negative['title'] + ' ' + negative['text']
+                                 if 'title' in negative else negative['text'])
+                formatted_documents.append((self.data_args.passage_prefix + negative_text, None, None, None))
+
+            return formatted_query, formatted_documents
+
         # Handling the new format
         query_id = group['query_id']
         query_text = group.get('query_text', '') or ''
@@ -392,86 +426,4 @@ class DistilTrainDataset(TrainDataset):
         # formatted_documents.append(
         #     self._get_info_from_docid(selected_positive_docid, self.data_args.passage_prefix)
         # )
-        return formated_query, formated_documents, formated_scores
-
-class WideDistilTrainDataset(TrainDataset):
-    def __init__(self, 
-                 data_args: DataArguments, 
-                 trainer = None, 
-                 dataset_name = None, 
-                 corpus_name = None, 
-                 dataset_path = None, 
-                 corpus_path = None):
-        super().__init__(data_args, trainer, dataset_name, corpus_name, dataset_path, corpus_path)
-
-    def __getitem__(self, item):
-        group = self.train_data[item]
-        epoch = int(self.trainer.state.epoch)
-
-        _hashed_seed = hash(item + self.trainer.args.seed)
-
-        query_id = group['query_id']
-        query_text = '' if 'query_text' not in group else group['query_text']
-        query_text = '' if query_text is None else query_text
-        query_image = None if 'query_image' not in group else group['query_image']
-        positive_document_ids = group['positive_document_ids']
-        negative_document_ids = group['negative_document_ids']
-        positive_scores = group['positive_document_scores']
-        negative_scores = group['negative_document_scores']
-
-        formated_query = (self.data_args.query_prefix + query_text, query_image)
-        formated_documents, formated_scores = [], []
-
-        # positive
-        selected_positive_document_id = positive_document_ids[(_hashed_seed + epoch) % len(positive_document_ids)]
-        positive_score = positive_scores[(_hashed_seed + epoch) % len(positive_document_ids)]
-        formated_documents.append(
-            self._get_info_from_docid(selected_positive_document_id, self.data_args.passage_prefix)
-        )
-        formated_scores.append(positive_score)
-
-        # irrelevant
-        irrelevant_document_ids = group['irrelevant_document_ids']
-        irrelevant_scores = group['irrelevant_document_scores']
-        irrelevant_indices = list(range(len(irrelevant_document_ids)))
-        irrelevant_size = self.data_args.train_irrelevant_size
-        if (irrelevant_size == 0) or (len(irrelevant_indices) == 0):
-            selected_irrelevant_document_indices = []
-        elif len(irrelevant_document_ids) < irrelevant_size:
-            selected_irrelevant_document_indices = random.choices(irrelevant_indices, k=irrelevant_size)
-        else:
-            _offset = epoch * irrelevant_size % len(irrelevant_document_ids)
-            selected_irrelevant_document_indices = [x for x in irrelevant_indices]
-            random.Random(_hashed_seed).shuffle(selected_irrelevant_document_indices)
-            selected_irrelevant_document_indices = selected_irrelevant_document_indices * 2
-            selected_irrelevant_document_indices = selected_irrelevant_document_indices[_offset: _offset + irrelevant_size]
-
-        for idx in selected_irrelevant_document_indices:
-            irrelevant_document_id = irrelevant_document_ids[idx]
-            formated_documents.append(
-                self._get_info_from_docid(irrelevant_document_id, self.data_args.passage_prefix)
-            )
-            formated_scores.append(irrelevant_scores[idx])
-
-        # negative
-        negative_indices = list(range(len(negative_document_ids)))
-        negative_size = self.data_args.train_group_size - 1 - len(selected_irrelevant_document_indices)
-        if len(negative_document_ids) < negative_size:
-            selected_negative_document_indices = random.choices(negative_indices, k=negative_size)
-        elif self.data_args.train_group_size == 1:
-            selected_negative_document_indices = []
-        else:
-            _offset = epoch * negative_size % len(negative_document_ids)
-            selected_negative_document_indices = [x for x in negative_indices]
-            random.Random(_hashed_seed).shuffle(selected_negative_document_indices)
-            selected_negative_document_indices = selected_negative_document_indices * 2
-            selected_negative_document_indices = selected_negative_document_indices[_offset: _offset + negative_size]
-
-        for idx in selected_negative_document_indices:
-            negative_document_id = negative_document_ids[idx]
-            formated_documents.append(
-                self._get_info_from_docid(negative_document_id, self.data_args.passage_prefix)
-            )
-            formated_scores.append(negative_scores[idx])
-
         return formated_query, formated_documents, formated_scores
