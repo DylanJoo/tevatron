@@ -69,7 +69,7 @@ class TevatronTrainer(Trainer):
 
         dtype = torch.float32
         dtype = torch.bfloat16 if self.args.bf16 else dtype
-        dtype = torch.fploat16 if self.args.fp16 else dtype
+        dtype = torch.float16 if self.args.fp16 else dtype
 
         # CPU autocast
         if self.use_cpu_amp:

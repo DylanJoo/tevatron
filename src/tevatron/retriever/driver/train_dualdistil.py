@@ -14,10 +14,10 @@ from tevatron.retriever.arguments import ModelArguments, DataArguments, \
 from tevatron.retriever.arguments import save_args_to_json
 from tevatron.retriever.modeling import DenseModel
 
-from tevatron.retriever.dataset_dev import CovDistilTrainDataset
-from tevatron.retriever.collator_dev import CovDistilTrainCollator
+from tevatron.retriever.dataset_dev import DualDistilTrainDataset
+from tevatron.retriever.collator_dev import DualDistilTrainCollator
 from tevatron.retriever.collator import EncodeCollator
-from tevatron.retriever.trainer_dev import TevatronCovDistilTrainer as Trainer
+from tevatron.retriever.trainer_dev import TevatronDualDistilTrainer as DistilTrainer
 
 from tevatron.retriever.callback.cruxmds_eval import Validator
 logger = logging.getLogger(__name__)
@@ -76,7 +76,7 @@ def main():
 
     if tokenizer.pad_token_id is None:
         tokenizer.pad_token_id = tokenizer.eos_token_id
-
+    
     if data_args.padding_side == 'right':
         tokenizer.padding_side = 'right'
     else:
@@ -99,10 +99,10 @@ def main():
 
     # TODO: see if we want to load from HF as well, then we can use `dataset_name`
     # NOTE: the data_args.dataset_config becomes the name of subset
-    train_dataset = CovDistilTrainDataset(data_args)
-    collator = CovDistilTrainCollator(data_args, tokenizer)
+    train_dataset = DualDistilTrainDataset(data_args)
+    collator = DualDistilTrainCollator(data_args, tokenizer)
 
-    trainer_cls = Trainer
+    trainer_cls = DistilTrainer
     trainer = trainer_cls(
         model=model,
         args=training_args,
