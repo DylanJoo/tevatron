@@ -77,31 +77,33 @@ def batch_inference(args, dataset, n_file=0, shard=0):
     output_dir = os.path.dirname(args.collection_output)
     os.makedirs(output_dir, exist_ok=True)
 
+    if os.path.exists(f'{args.collection_output}_{n_file}_{shard}'):
+        return 0
+
+    examples = []
+    data_iterator = batch_iterator(dataset, args.batch_size, False)
+
+    for batch in tqdm(data_iterator, total=len(dataset)//args.batch_size+1, desc='Encoding'):
+        batch_vectors = generate_vocab_vector(
+                docs=batch['contents'],
+                encoder=model,
+                minimum=args.minimum,
+                device=args.device,
+                max_length=args.max_length,
+                quantization_factor=args.quantization_factor
+        )
+
+        n = len(batch['id'])
+        for i in range(n):
+            examples.append({
+                "id": batch['id'][i],
+                "contents": batch['contents'][i],
+                "vector": batch_vectors[i]
+            })
+
     with open(f'{args.collection_output}_{n_file}_{shard}', 'w') as fout:
-        vectors = []
-        data_iterator = batch_iterator(dataset, args.batch_size, False)
-
-        for batch in tqdm(data_iterator, total=len(dataset)//args.batch_size+1, desc='Encoding'):
-            batch_vectors = generate_vocab_vector(
-                    docs=batch['contents'], 
-                    encoder=model,
-                    minimum=args.minimum,
-                    device=args.device,
-                    max_length=args.max_length,
-                    quantization_factor=args.quantization_factor
-            )
-            vectors += batch_vectors
-
-            # collection and re-dump the collections
-            n = len(batch['id'])
-            for i in range(n):
-                example = {
-                    "id": batch['id'][i],
-                    "contents": batch['contents'][i],
-                    "title": batch['title'][i],
-                    "vector": batch_vectors[i]
-                }
-                fout.write(json.dumps(example, ensure_ascii=False)+'\n')
+        for example in examples:
+            fout.write(json.dumps(example, ensure_ascii=False)+'\n')
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
@@ -112,6 +114,7 @@ if __name__ == '__main__':
     parser.add_argument("--collection", type=str)
     parser.add_argument("--collection_output", type=str)
     parser.add_argument("--batch_size", type=int, default=None)
+    parser.add_argument("--exclude_title", default=False, action='store_true')
 
     # huggingface input
     parser.add_argument("--dataset_name", type=str, default=None)
@@ -135,10 +138,14 @@ if __name__ == '__main__':
     if args.dataset_name:
         from datasets import load_dataset
         hf_dataset = load_dataset(args.dataset_name, split=args.dataset_split)
+        print(hf_dataset)
 
         collection = []
         for ex in hf_dataset:
-            collection.append({'id': ex['docid'], 'title': ex['title'], 'contents': ex['text']})
+            if ('title' in ex) and (args.exclude_title is False):
+                collection.append({'id': ex['docid'], 'contents': ex['title'] + ' ' + ex['text']})
+            else:
+                collection.append({'id': ex['docid'], 'contents': ex['text']})
 
             if len(collection) >= 1000000:
                 dataset = Dataset.from_list(collection)
@@ -151,6 +158,7 @@ if __name__ == '__main__':
         # finish the rest of collections
         if len(collection) > 0:
             dataset = Dataset.from_list(collection)
+            print(dataset)
             batch_inference(args, dataset, 0, i)
 
     # load data from jsonl
