@@ -33,6 +33,10 @@ class SearchArguments:
         default=False,
         metadata={"help": "Use approximate search (faster but less accurate)"}
     )
+    no_gpu_search: bool = field(
+        default=False,
+        metadata={"help": "Use CPU for FAISS search to avoid GPU OOM. Encoding can still use GPU separately."}
+    )
 
 
 def maxp(passage_triples: List[Tuple[int, int, float]], mapping) -> Dict[str, float]:
@@ -88,6 +92,10 @@ def main():
     logger.info(f"Loaded {len(queries)} queries.")
 
     # Search with colbert-ai
+    if search_args.no_gpu_search:
+        logger.info("no_gpu_search=True: disabling GPU for FAISS search (CPU only).")
+        os.environ["CUDA_VISIBLE_DEVICES"] = ""
+
     from colbert import Searcher
     from colbert.infra import Run, RunConfig, ColBERTConfig
 
