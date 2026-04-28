@@ -43,7 +43,7 @@ class FaissFlatSearcher:
         num_subqueries = sq_reps.shape[1]
         sq_reps_flatten = sq_reps.reshape(-1, sq_reps.shape[-1])
         nn_scores, nn_indices = self.search(sq_reps_flatten, k)
-        num_docs = 0
+        num_docs = nn_indices.shape[1]
 
         batch_indices, batch_scores = [], []
         for batch_idx in range(batch_size):

@@ -119,7 +119,7 @@ def main():
     if os.path.isdir(training_args.output_dir):
         last_checkpoint = get_last_checkpoint(training_args.output_dir)
 
-    trainer.train(resume_from_checkpoint=(last_checkpoint is not None))
+    trainer.train(resume_from_checkpoint=last_checkpoint)
     trainer.save_model()
     if trainer.is_world_process_zero():
         tokenizer.save_pretrained(training_args.output_dir)
