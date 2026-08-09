@@ -248,7 +248,7 @@ class EncodeDataset(Dataset):
         content = self.encode_data[item]
         # TODO: clean up the id loading and text loading for query/passages
         if self.data_args.encode_is_query:
-            content_id = content.get('query_id', content.get('id', content.get('request_id', None)))
+            content_id = content.get('query_id', content.get('id', content.get('request_id', content.get('qid', None))))
             content_text = content.get('query_text', content.get('query', content.get('request', content.get('problem_statement', None))))
             content_text = self.data_args.query_prefix + content_text
             content_image = content.get('query_image', None)
