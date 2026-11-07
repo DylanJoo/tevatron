@@ -1,7 +1,6 @@
 import random
 import os
 from typing import List, Tuple
-from copy import copy
 
 from datasets import load_dataset, load_from_disk
 from torch.utils.data import Dataset
@@ -182,19 +181,47 @@ class MultiTrainDataset(Dataset):
                  data_args: DataArguments,
                  dataset_list=None,
                  corpus_list=None,
-                 dataset_split_list=None,
                  trainer=None):
         self.data_args = data_args
         self.trainer = trainer
         self.train_datasets = []
 
-        # NOTE: original implementation supports only the file input
-        for dataset_name, corpus_name, dataset_split in zip(dataset_list, corpus_list, dataset_split_list):
-            data_args = copy(self.data_args)
-            data_args.dataset_name = dataset_name
-            data_args.corpus_name = corpus_name
-            data_args.dataset_split = dataset_split
-            self.train_datasets.append(TrainDataset(data_args, self.trainer))
+        for ds_entry, corpus_entry in zip(dataset_list, corpus_list):
+            ds_path = ds_entry['name']
+            corpus_path = corpus_entry['name']
+            corpus_assets_path = corpus_entry['assets_path']
+            dataset_name = None
+            corpus_name = None
+            ds_file = None
+            corpus_file = None
+
+            # Determine dataset type
+            if os.path.isdir(ds_path):
+                dataset_name = ds_path
+            elif ds_path.endswith('.jsonl'):
+                dataset_name = 'json'
+                ds_file = ds_path
+            else:
+                dataset_name = ds_path
+
+            # Determine corpus type
+            if corpus_path is None:
+                corpus_name = None
+            elif os.path.isdir(corpus_path):
+                corpus_name = corpus_path
+            elif corpus_path.endswith('.jsonl'):
+                corpus_name = 'json'
+                corpus_file = corpus_path
+            else:
+                corpus_name = corpus_path
+
+            self.train_datasets.append(
+                TrainDataset(self.data_args, self.trainer,
+                             dataset_name, corpus_name,
+                             dataset_path=ds_file,
+                             corpus_path=corpus_file,
+                             corpus_assets_path=corpus_assets_path)
+            )
 
     def __len__(self):
         return sum(len(dataset) for dataset in self.train_datasets)
@@ -374,7 +401,7 @@ class DistilTrainDataset(TrainDataset):
             # selected_negative_document_ids = random.choices(negative_document_ids, k=negative_size)
             selected_negative_document_indices = random.choices(negative_indices, k=negative_size)
         elif self.data_args.train_group_size == 1:
-            selected_negative_document_idices = []
+            selected_negative_document_indices = []
         else:
             _offset = epoch * negative_size % len(negative_document_ids)
             # selected_negative_document_ids = [x for x in negative_document_ids]

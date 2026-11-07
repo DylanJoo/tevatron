@@ -94,12 +94,6 @@ plus a corpus with `docid`, `text` and optionally `title`.
 - `documents` = `G` tuples `(passage_prefix + text, image, video, audio)`. The first is the
   positive; the rest are negatives, sampled deterministically per epoch.
 
-### `MultiTrainDataset`
-
-Rewritten to take HF dataset names instead of file paths:
-`MultiTrainDataset(data_args, dataset_list, corpus_list, dataset_split_list)` builds one
-`TrainDataset` per `(dataset, corpus, split)` triple. Not used by the paper scripts.
-
 ### `EncodeDataset`
 
 Accepts more column names, so BEIR, CRUX and NeuCLIR files can be encoded without conversion:
@@ -123,8 +117,6 @@ Now reads the teacher scores **from the training row** instead of from a separat
 **Output:** `(query, documents, scores)`, where `scores` is a list of `G` floats aligned with
 `documents`.
 
-> Known issue: with `train_group_size == 1` a misspelt variable
-> (`selected_negative_document_idices`) raises a `NameError`.
 
 ### `WideDistilTrainDataset` (new) — base of the CoveR dataset
 
