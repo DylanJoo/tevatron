@@ -34,3 +34,12 @@ Nothing in the current pipeline reaches this branch: the in-training validators 
 ### `build(...)` / `load(...)`
 
 Unchanged from upstream.
+
+### `gradient_checkpointing_enable(**kwargs)`
+
+**Changed:** it uses **non-reentrant** checkpointing (`use_reentrant=False`) by default and forwards
+`--gradient_checkpointing_kwargs` (upstream ignores the kwargs, so HF's reentrant default was used).
+Reentrant checkpointing runs a nested backward per checkpointed block, which breaks DDP when the
+encoder is called several times per step, as `TevatronDualDistilTrainer` does for queries, passages and
+sub-questions (`RuntimeError: Expected to mark a variable ready only once`). Only relevant with
+`--gradient_checkpointing`.

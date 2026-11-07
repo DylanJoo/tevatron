@@ -110,7 +110,11 @@ class EncoderModel(nn.Module):
         return self.cross_entropy(scores, target)
     
     def gradient_checkpointing_enable(self, **kwargs):
-        self.encoder.gradient_checkpointing_enable()
+        # Non-reentrant checkpointing by default: the reentrant variant runs a nested backward per
+        # checkpointed block, which breaks DDP when the encoder is used several times per step
+        # ("Expected to mark a variable ready only once"), e.g. queries + passages + sub-questions.
+        self.encoder.gradient_checkpointing_enable(
+            gradient_checkpointing_kwargs=kwargs.get("gradient_checkpointing_kwargs") or {"use_reentrant": False})
 
     def _dist_gather_tensor(self, t: Optional[torch.Tensor]):
         if t is None:
