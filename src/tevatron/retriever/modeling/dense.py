@@ -8,66 +8,10 @@ logger = logging.getLogger(__name__)
 
 class DenseModel(EncoderModel):
 
-    def encode_query(self, qry, num_views=0, view_pooling=None, view_start_idx=5):
+    def encode_query(self, qry):
         query_hidden_states = self.encoder(**qry, return_dict=True)
         query_hidden_states = query_hidden_states.last_hidden_state
-        if num_views == 0:
-            return self._pooling(query_hidden_states, qry['attention_mask'])
-
-        masked_hiddens = query_hidden_states.masked_fill(~qry['attention_mask'][..., None].bool(), 0.0)
-        query_mask = qry['attention_mask'].clone()
-
-        if view_pooling=='cumulative':
-            ### NOTE: cumulative/incremental pooling
-            query_mask[:, 5:(5+num_views)] = False # exclude view tokens
-            query_sum = (masked_hiddens * query_mask[..., None]).sum(dim=1)
-            query_len = query_mask.sum(dim=1)
-
-            views_cumsum = (masked_hiddens[:, view_start_idx:(view_start_idx+num_views), :]).cumsum(dim=1) # B 5 H
-            views_len = query_len[..., None] + torch.arange(1, num_views + 1, device=masked_hiddens.device)[None, ...] # B 5
-            views_reps = query_sum.unsqueeze(1) + views_cumsum # B 5 H
-            reps = views_reps / views_len.unsqueeze(-1)
-
-        elif view_pooling == 'cluster':
-            ### NOTE: cluster pooling
-            cluster_reps = masked_hiddens[:, view_start_idx:(view_start_idx+num_views), :] # B N H
-            query_reps = torch.cat([ masked_hiddens[:, :view_start_idx, :], masked_hiddens[:, (view_start_idx+num_views):, :] ], dim=1)  # B Q H
-            cluster_logit = torch.matmul(cluster_reps, query_reps.transpose(1, 2)) # B N H, B H Q = B N Q
-
-            # each query tokens belong to a view, and then take the mean average for each subset of views
-            cluster_indices = torch.nn.functional.gumbel_softmax(cluster_logit, dim=1, hard=True) # B N Q
-            cluster_reps = torch.matmul(cluster_indices, query_reps) # B N Q, B Q H = B N H
-            cluster_counts = (cluster_indices.sum(dim=-1) + 1e-4) # B 5
-            reps = cluster_reps / cluster_counts.unsqueeze(-1)
-
-        elif view_pooling == 'weighted':
-            cluster_reps = masked_hiddens[:, view_start_idx:(view_start_idx+num_views), :] # B N H
-            query_reps = torch.cat([ masked_hiddens[:, :view_start_idx, :], masked_hiddens[:, (view_start_idx+num_views):, :] ], dim=1)  # B Q H
-            cluster_logit = torch.matmul(cluster_reps, query_reps.transpose(1, 2)) # B N H, B H Q = B N Q
-
-            # each view has a distribution of query token (sum to 1), and then take the sum for each distribution to form a view.
-            cluster_dist = torch.nn.functional.softmax(cluster_logit, dim=-1) # B 5 Q # along the query dimension
-            reps = torch.matmul(cluster_dist, masked_hiddens) # B 5 Q, B Q H = B 5 H
-
-        else:
-            ### NOTE: independent poolign
-            query_mask[:, view_start_idx:(view_start_idx+num_views)] = False # exclude view tokens
-            query_sum = (masked_hiddens * query_mask[..., None]).sum(dim=1)
-            query_len = query_mask.sum(dim=1)
-
-            views_len = query_len[..., None] + torch.ones(num_views, device=masked_hiddens.device)[None, ...] # B 5
-            views_reps = masked_hiddens[:, view_start_idx:(view_start_idx+num_views), :] # B 5 H
-
-            # Option1: mean over query+special tokens
-            # views_reps = query_sum.unsqueeze(1) + views_reps # B 5 H
-            # reps = views_reps / views_len.unsqueeze(-1)
-
-            # Option2: mean over query then plus special tokens
-            query_reps = query_sum / query_len[..., None]
-            reps = query_reps.unsqueeze(1) + views_reps # B 5 H
-
-        reps = torch.nn.functional.normalize(reps, p=2, dim=-1)
-        return reps
+        return self._pooling(query_hidden_states, qry['attention_mask'])
     
     def encode_passage(self, psg):
         # encode passage is the same as encode query

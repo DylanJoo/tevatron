@@ -32,10 +32,6 @@ class EncoderModel(nn.Module):
                  pooling: str = 'cls',
                  normalize: bool = False,
                  temperature: float = 1.0,
-                 num_views: int = 0,
-                 view_pooling: str = 'independent',
-                 aggregation_strategy: str = 'mean',
-                 view_start_idx: int = 5,
                  ):
         super().__init__()
         self.config = encoder.config
@@ -43,10 +39,6 @@ class EncoderModel(nn.Module):
         self.pooling = pooling
         self.normalize = normalize
         self.temperature = temperature
-        self.num_views = num_views
-        self.view_pooling = view_pooling
-        self.view_start_idx = view_start_idx
-        self.aggregation_strategy = aggregation_strategy
         self.cross_entropy = nn.CrossEntropyLoss(reduction='mean')
         self.is_ddp = dist.is_initialized()
         if self.is_ddp:
@@ -54,14 +46,12 @@ class EncoderModel(nn.Module):
             self.world_size = dist.get_world_size()
 
     def forward(self, query: Dict[str, Tensor] = None, passage: Dict[str, Tensor] = None):
-        q_reps = self.encode_query(query, self.num_views, self.view_pooling, self.view_start_idx) if query else None
+        q_reps = self.encode_query(query) if query else None
         p_reps = self.encode_passage(passage) if passage else None
         logs = {}
 
-        # for inference #TODO: fix this 
+        # for inference
         if q_reps is None or p_reps is None:
-            # if q_reps is not None and q_reps.dim() == 3: # So far, we 
-            #     q_reps = q_reps[:, 0, :]  
             return EncoderOutput(
                 q_reps=q_reps,
                 p_reps=p_reps
@@ -114,14 +104,7 @@ class EncoderModel(nn.Module):
         raise NotImplementedError('EncoderModel is an abstract class')
 
     def compute_similarity(self, q_reps, p_reps):
-        if q_reps.dim() == 2:
-            return torch.matmul(q_reps, p_reps.transpose(0, 1))
-        else: 
-            scores_multi = torch.matmul(q_reps, p_reps.transpose(0, 1))
-            if self.aggregation_strategy=='max':
-                return scores_multi.max(dim=1).values
-            else:
-                return scores_multi.mean(dim=1)
+        return torch.matmul(q_reps, p_reps.transpose(0, 1))
 
     def compute_loss(self, scores, target):
         return self.cross_entropy(scores, target)
@@ -174,22 +157,14 @@ class EncoderModel(nn.Module):
                 encoder=lora_model,
                 pooling=model_args.pooling,
                 normalize=model_args.normalize,
-                temperature=model_args.temperature,
-                num_views=model_args.num_views,
-                view_pooling=model_args.view_pooling,
-                aggregation_strategy=train_args.aggregation_strategy,
-                view_start_idx=model_args.view_start_idx
+                temperature=model_args.temperature
             )
         else:
             model = cls(
                 encoder=base_model,
                 pooling=model_args.pooling,
                 normalize=model_args.normalize,
-                temperature=model_args.temperature,
-                num_views=model_args.num_views,
-                view_pooling=model_args.view_pooling,
-                aggregation_strategy=train_args.aggregation_strategy,
-                view_start_idx=model_args.view_start_idx
+                temperature=model_args.temperature
             )
         return model
 
@@ -199,10 +174,6 @@ class EncoderModel(nn.Module):
              pooling: str = 'cls',
              normalize: bool = False,
              lora_name_or_path: str = None,
-             num_views: int = 0,
-             view_pooling: str = 'ind',
-             aggregation_strategy: str = 'mean',
-             view_start_idx: int = 5,
              **hf_kwargs):
         print("kwargs for model loading", hf_kwargs)
         base_model = cls.TRANSFORMER_CLS.from_pretrained(model_name_or_path, **hf_kwargs)
@@ -215,21 +186,13 @@ class EncoderModel(nn.Module):
             model = cls(
                 encoder=lora_model,
                 pooling=pooling,
-                normalize=normalize,
-                num_views=num_views,
-                view_pooling=view_pooling,
-                aggregation_strategy=aggregation_strategy,
-                view_start_idx=view_start_idx
+                normalize=normalize
             )
         else:
             model = cls(
                 encoder=base_model,
                 pooling=pooling,
-                normalize=normalize,
-                num_views=num_views,
-                view_pooling=view_pooling,
-                aggregation_strategy=aggregation_strategy,
-                view_start_idx=view_start_idx
+                normalize=normalize
             )
         return model
 

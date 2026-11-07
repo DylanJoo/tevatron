@@ -47,9 +47,7 @@ class Validator:
                 with torch.no_grad():
                     model_output: EncoderOutput = model(passage=batch.to(device))
                     doc_embs = model_output.p_reps.cpu().detach().numpy()
-                    scores = query_embs[idx] @ doc_embs.T # (N H) or (H) x (H D) = (N, D) or (D)
-                    if scores.ndim == 2: # only check one qid
-                        scores = scores.mean(axis=0)
+                    scores = query_embs[idx] @ doc_embs.T # (H) x (H D) = (D)
 
                 # assign scores
                 qid = idx2qid[idx]

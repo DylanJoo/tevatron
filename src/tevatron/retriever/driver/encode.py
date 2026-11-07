@@ -70,12 +70,9 @@ def main():
         pooling=model_args.pooling,
         normalize=model_args.normalize,
         lora_name_or_path=model_args.lora_name_or_path,
-        num_views=model_args.num_views,
-        view_pooling=model_args.view_pooling,
         cache_dir=model_args.cache_dir,
         torch_dtype=torch_dtype,
         attn_implementation=model_args.attn_implementation,
-        view_start_idx=model_args.view_start_idx,
     )
 
     if isinstance(data_args.dataset_name, list):

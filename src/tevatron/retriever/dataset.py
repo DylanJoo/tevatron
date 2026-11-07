@@ -295,6 +295,7 @@ class EncodeDataset(Dataset):
         return content_id, content_text, content_image, content_video, content_audio
 
 
+# NOTE: remove the score fetching function. It could be done in the data preprocessing.
 class DistilTrainDataset(TrainDataset):
     def __init__(self, 
                  data_args: DataArguments, 

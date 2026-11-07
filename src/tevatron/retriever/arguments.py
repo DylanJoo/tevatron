@@ -79,34 +79,15 @@ class ModelArguments:
         },
     )
 
-    # for muilti-view
-    num_views: int = field(
-        default=0,
-        metadata={"help": "number of views in the query representation. If 0, it is single vector pooling."}
-    )
-    view_pooling: str = field(
-        default='independent',
-        metadata={"help": "how to pool the view representation"}
-    )
-    view_start_idx: int = field(
-        default=5,
-        metadata={"help": "0: [CLS], 1: search, 2: _, 3: query, 4: :, 5: [unused0]"}
-    )
 
 
 @dataclass
 class DataArguments:
-    # [Dylan] added for eval with qrel
-    eval_dataset_name: str = field(default=None, metadata={"help": "quick evaluation using qrel."})
-    eval_dataset_split: str = field(default=None, metadata={"help": "eval data split"})
-    eval_group_size: int = field(default=32, metadata={"help": "number of passages used to eval for each query"})
-    eval_corpus_name: str = field(default=None, metadata={"help": "the corpus name for docid in eval set, None would use `corpus_name`"})
+    # [Dylan] added
     exclude_title: bool = field(default=False, metadata={"help": "append title in the begining."})
     request_as_query: bool = field(default=False, metadata={"help": "replace query with long request."})
     train_irrelevant_size: int = field(default=0, metadata={"help": "number of passages used to train for each query"})
 
-    # [Dylan] added for multi-aspect retrieval
-    concat_query: bool = field(default=False, metadata={"help": "whether or not concat the original query in the beginging."})
 
     dataset_name: str = field(
         default='json', metadata={"help": "huggingface dataset name"}
@@ -191,9 +172,6 @@ class DataArguments:
     query_prefix: str = field(
         default='', metadata={"help": "prefix or instruction for query"}
     )
-    query_postfix: str = field(
-        default='', metadata={"help": "prefix or instruction for query"}
-    )
     subquery_prefix: str = field(
         default='', metadata={"help": "prefix or instruction for subquery"}
     )
@@ -256,12 +234,6 @@ class TevatronTrainingArguments(TrainingArguments):
     contrastive_lambda: float = field(default=1.0, metadata={"help": "learning weight for original objectives"})
     covdistil_lambda: float = field(default=0.0, metadata={"help": "learning weight for distillation"})
     sq_contrastive_lambda: Optional[float] = field(default=0.0, metadata={"help": "learning weight for sq_constrative"})
-    aggregation_strategy: str = field(default='sum', metadata={"help": "score pooling for subquery relevance."})
-    covdistil_method: str = field(default='KLD', metadata={"help": "what kinds of distillation logics to use, supporting KLD and MarginMSE."})
-    view_orthogonalize_method: str = field(default=None, metadata={"help": "what kinds of orthogonalization"})
-    view_orthogonalize_lambda: float = field(default=0.0, metadata={"help": "learning weight for orthogonalization"})
-    use_crossentropy: float = field(default=1.0, metadata={"help": "use contrastive learning with crossentropy"})
-    use_kld: float = field(default=0.0, metadata={"help": "use kld learning with crossentropy"})
 
 def save_args_to_json(output_path: str, **arg_groups: Any):
     output = {}

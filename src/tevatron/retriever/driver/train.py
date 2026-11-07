@@ -12,7 +12,6 @@ from transformers.trainer_utils import get_last_checkpoint
 from tevatron.retriever.arguments import ModelArguments, DataArguments, \
     TevatronTrainingArguments as TrainingArguments
 from tevatron.retriever.dataset import TrainDataset
-from tevatron.retriever.dataset_dev import QrelDataset
 from tevatron.retriever.collator import TrainCollator
 from tevatron.retriever.modeling import DenseModel
 from tevatron.retriever.trainer import TevatronTrainer as Trainer
@@ -85,32 +84,21 @@ def main():
         model_args,
         training_args,
         cache_dir=model_args.cache_dir,
-        dtype=torch_dtype,
+        torch_dtype=torch_dtype,
         attn_implementation=model_args.attn_implementation,
     )
 
-    # TODO: see if we want to load from HF as well, then we can use `dataset_name`
-    # NOTE: the data_args.dataset_config becomes the name of subset
     train_dataset = TrainDataset(data_args)
     collator = TrainCollator(data_args, tokenizer)
-    if training_args.do_eval:
-        eval_dataset = QrelDataset(data_args, corpus_name=data_args.eval_corpus_name)
-    else:
-        eval_dataset = None
 
     trainer_cls = GCTrainer if training_args.grad_cache else Trainer
     trainer = trainer_cls(
         model=model,
         args=training_args,
         train_dataset=train_dataset,
-        eval_dataset=eval_dataset,
         data_collator=collator
     )
-
-    # TODO: make this easier to understand
     train_dataset.set_trainer(trainer)
-    if training_args.do_eval:
-        eval_dataset.set_trainer(trainer)
     
     last_checkpoint = None
     if os.path.isdir(training_args.output_dir):
