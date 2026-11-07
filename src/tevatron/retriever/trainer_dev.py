@@ -4,7 +4,6 @@ from typing import Optional
 import numpy as np
 import torch
 import torch.nn.functional as F
-from torch.utils.data import DataLoader
 
 from transformers.trainer import Trainer, TRAINING_ARGS_NAME
 import torch.distributed as dist
@@ -16,7 +15,7 @@ logger = logging.getLogger(__name__)
 
 class TevatronDualDistilTrainer(TevatronTrainer):
 
-    def compute_loss(self, model, inputs, return_outputs=False, num_items_in_batch=None, return_loss=None):
+    def compute_loss(self, model, inputs, return_outputs=False, num_items_in_batch=None):
         # the coverage scores (last element) are not used by the loss
         query, passage, subquery, num_subqueries, _ = inputs
         num_subqueries = torch.tensor(num_subqueries, device=query['input_ids'].device)

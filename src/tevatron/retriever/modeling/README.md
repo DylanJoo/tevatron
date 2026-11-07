@@ -27,10 +27,10 @@ Remaining differences from upstream:
 
 `EncoderOutput` gained a `logs: Optional[Dict]` field for this.
 
-The eval branch only runs through `TevatronTrainer.compute_loss`'s legacy dict-input path. The
-in-training evaluation the drivers use is the validator in [`../callback/`](../callback/README.md),
-which calls the model in inference mode, so this branch is effectively unused.
+Nothing in the current pipeline reaches this branch: the in-training validators in
+[`../callback/`](../callback/README.md) call the model with only a query or only a passage
+(inference mode). It is kept for direct use, e.g. computing in-batch accuracy on a held-out split.
 
 ### `build(...)` / `load(...)`
 
-Unchanged except that they `print` the `hf_kwargs` passed to `from_pretrained` (debug output).
+Unchanged from upstream.

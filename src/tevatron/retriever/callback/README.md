@@ -2,7 +2,7 @@
 
 Light-weight **re-ranking validators** that run inside training. A driver attaches one with
 `trainer.set_validator(Validator(EncodeCollator(data_args, tokenizer), 512))`. Then
-`TevatronTrainer.training_step` calls `prediction_step` → `validator.run(model, device)` every
+`TevatronTrainer.training_step` calls `validation_step` → `validator.run(model, device)` every
 `--eval_steps` steps (rank 0 only). Each returned metric is logged as `eval/<name>`, and their mean as `eval/avg`.
 
 Both validators have the same interface:

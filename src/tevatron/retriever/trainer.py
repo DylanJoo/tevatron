@@ -1,8 +1,8 @@
 import os
+import contextlib
 from typing import Optional
 
 import torch
-from torch.utils.data import DataLoader
 
 from transformers.trainer import Trainer, TRAINING_ARGS_NAME
 import torch.distributed as dist
@@ -49,17 +49,9 @@ class TevatronTrainer(Trainer):
         # Good practice: save your training arguments together with the trained model
         torch.save(self.args, os.path.join(output_dir, TRAINING_ARGS_NAME))
 
-    def compute_loss(self, model, inputs, return_outputs=False, num_items_in_batch=None, return_loss=None):
-        if isinstance(inputs, dict) is False:
-            query, passage = inputs
-            return model(query=query, passage=passage).loss
-        else:
-            query, passage = inputs['inputs'] # Hacky workaround for `prediction_step`
-            outputs = model(query=query, passage=passage)
-            loss = outputs.loss
-            self.log({f"eval/{key}": outputs.logs[key] for key in outputs.logs})
-
-            return (loss, [])
+    def compute_loss(self, model, inputs, return_outputs=False, num_items_in_batch=None):
+        query, passage = inputs
+        return model(query=query, passage=passage).loss
 
     def autocast_smart_context_manager(self, cache_enabled: Optional[bool] = True):
         """
@@ -91,41 +83,20 @@ class TevatronTrainer(Trainer):
         return contextlib.nullcontext()
 
     def training_step(self, *args):
-        if (self.state.global_step % self.args.eval_steps == 0) and (self.validator):
-            self.prediction_step(*args)
+        # run the validator every `eval_steps` (including step 0) when one is attached
+        if self.validator and self.args.eval_steps and (self.state.global_step % self.args.eval_steps == 0):
+            self.validation_step(args[0])  # args[0] is the model
         return super(TevatronTrainer, self).training_step(*args) / self._dist_loss_scale_factor
 
-    # def prediction_step(self, models, inputs, *args, **kwargs):
-    #     query, passage = inputs
-    #     inputs = {'inputs': inputs, 'return_loss': True}
-    #     return super(TevatronTrainer, self).prediction_step(models, inputs, *args, **kwargs)
-
-    # NOTE: move to two device?
-    def prediction_step(self, models, inputs, *args, **kwargs):
-        if not dist.is_initialized() or dist.get_rank() == 0:
-            with torch.no_grad():
-                logs = self.validator.run(models, self.args.device)
-                sum_values = 0.0
-                for key, value in logs.items():
-                    self.log({f"eval/{key}": value})
-                    sum_values += value
-
-                self.log({"eval/avg": float(sum_values / len(logs))})
-                avg = torch.tensor(sum_values / len(logs), device=self.args.device)
-            return (avg, None, None)
-        else:
-            return (None, None, None)
-
-    def get_eval_dataloader(self, eval_dataset) -> DataLoader:
-        data_collator = self.data_collator
-        return DataLoader(
-            eval_dataset,
-            sampler=None,
-            collate_fn=data_collator,
-            batch_size=self.args.per_device_eval_batch_size,
-            shuffle=False,
-            drop_last=False
-        )
+    def validation_step(self, model):
+        """Run the attached validator on rank 0 and log its metrics as eval/*."""
+        if dist.is_initialized() and dist.get_rank() != 0:
+            return
+        with torch.no_grad():
+            logs = self.validator.run(model, self.args.device)
+        for key, value in logs.items():
+            self.log({f"eval/{key}": value})
+        self.log({"eval/avg": float(sum(logs.values()) / len(logs))})
 
 class DistilTevatronTrainer(TevatronTrainer):
     def __init__(self, *args, **kwargs):
@@ -134,54 +105,37 @@ class DistilTevatronTrainer(TevatronTrainer):
         self._dist_loss_scale_factor = dist.get_world_size() if self.is_ddp else 1
 
     def compute_loss(self, model, inputs, return_outputs=False, num_items_in_batch=None):
-
-        if isinstance(inputs, dict) is False:
-            query, passage, reranker_labels = inputs
-            scores = model(query=query, passage=passage).scores
-            
-            # reranker_scores are gathered across all processes
-            if hasattr(model, 'module'):
-                if model.module.is_ddp:
-                    reranker_labels = model.module._dist_gather_tensor(reranker_labels)
-            else:
-                if model.is_ddp:
-                    reranker_labels = model._dist_gather_tensor(reranker_labels)
-            
-            # Derive student_scores [batch, num_labels]
-            batch_size, total_passages = scores.size() # (B, nB)
-            num_labels = reranker_labels.size(1) # (B*nB)
-            start_idxs = torch.arange(0, batch_size * num_labels, num_labels, device=scores.device)
-            idx_matrix = start_idxs.view(-1, 1) + torch.arange(num_labels, device=scores.device)
-            student_scores = scores.gather(1, idx_matrix)
-
-            # Temperature‐scaled soft distributions
-            T = self.args.distil_temperature
-            student_log   = torch.log_softmax(student_scores.float() / T, dim=1)
-            teacher_probs = torch.softmax(reranker_labels.float()    / T, dim=1)
-
-            # KL Divergence loss (shapes now [batch, num_labels])
-            loss = torch.nn.functional.kl_div(
-                student_log,
-                teacher_probs,
-                reduction="batchmean"
-            ) * self._dist_loss_scale_factor
-
-            return loss
-
+        query, passage, reranker_labels = inputs
+        scores = model(query=query, passage=passage).scores
+        
+        # reranker_scores are gathered across all processes
+        if hasattr(model, 'module'):
+            if model.module.is_ddp:
+                reranker_labels = model.module._dist_gather_tensor(reranker_labels)
         else:
-            query, passage, _ = inputs['inputs'] # Hacky workaround for `prediction_step`
-            outputs = model(query=query, passage=passage)
-            loss = outputs.loss
-            self.log({f"eval/{key}": outputs.logs[key] for key in outputs.logs})
+            if model.is_ddp:
+                reranker_labels = model._dist_gather_tensor(reranker_labels)
+        
+        # Derive student_scores [batch, num_labels]
+        batch_size, total_passages = scores.size() # (B, nB)
+        num_labels = reranker_labels.size(1) # (B*nB)
+        start_idxs = torch.arange(0, batch_size * num_labels, num_labels, device=scores.device)
+        idx_matrix = start_idxs.view(-1, 1) + torch.arange(num_labels, device=scores.device)
+        student_scores = scores.gather(1, idx_matrix)
 
-            return (loss, [])
+        # Temperature‐scaled soft distributions
+        T = self.args.distil_temperature
+        student_log   = torch.log_softmax(student_scores.float() / T, dim=1)
+        teacher_probs = torch.softmax(reranker_labels.float()    / T, dim=1)
+
+        # KL Divergence loss (shapes now [batch, num_labels])
+        loss = torch.nn.functional.kl_div(
+            student_log,
+            teacher_probs,
+            reduction="batchmean"
+        ) * self._dist_loss_scale_factor
+
+        return loss
 
     def training_step(self, *args):
-        if self.state.global_step % self.args.eval_steps == 0: 
-            self.prediction_step(*args)
         return super(DistilTevatronTrainer, self).training_step(*args) / self._dist_loss_scale_factor
-
-    # def prediction_step(self, models, inputs, *args, **kwargs):
-    #     query, passage, _ = inputs
-    #     inputs = {'inputs': inputs, 'return_loss': True}
-    #     return super(TevatronTrainer, self).prediction_step(models, inputs, *args, **kwargs)

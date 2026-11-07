@@ -18,7 +18,6 @@ All training drivers parse `ModelArguments`, `DataArguments` and `TevatronTraini
 | `train_dev.py` | **Pre-fine-tuning (PFT)** | `TrainDataset` → `TrainCollator` → `TevatronTrainer` | NanoBEIR (`callback/nanobeir_eval.py`) |
 | `encode.py` | **Inference** (modified) | `EncodeDataset` → `EncodeCollator` → `DenseModel.load` | – |
 | `search.py` | **Inference** (modified) | – | – |
-| `train_distil_dev.py` | experimental, **broken** | `DistilTrainDataset` → `DistilTrainCollator` → `DistilTevatronTrainer` | imports `callback.crux_eval`, which does not exist |
 | `train.py` | upstream (unchanged) | `TrainDataset` → `TrainCollator` → `TevatronTrainer`/`GradCacheTrainer` | – |
 | `encode_lsr.py` | experimental | standalone SPLADE-style sparse encoder | – |
 | `diversify/` | experimental | see [`diversify/README.md`](diversify/README.md) | – |
@@ -29,7 +28,7 @@ The objectives of each trainer are documented in [`../README.md`](../README.md#t
 
 ## `train_dualdistil.py` — CoveR training
 
-1. Writes `<output_dir>/arguments.json` with `save_args_to_json`.
+1. Writes `<output_dir>/arguments.json` with all model, data and training arguments (`save_args_to_json`, rank 0 only).
 2. Builds the tokenizer, then sets the pad token (EOS if missing) and the padding side.
 3. `DenseModel.build(model_args, training_args, torch_dtype=…)`.
 4. `DualDistilTrainDataset(data_args)` + `DualDistilTrainCollator(data_args, tokenizer)`.
@@ -63,7 +62,7 @@ This driver replaces the removed `train_covdistil.py`. Its loss is identical
 Same flow as above, but with standard contrastive training (`TrainDataset`/`TrainCollator`/
 `TevatronTrainer`) and the NanoBEIR validator. Used for the MS-MARCO
 (`Tevatron/msmarco-passage-new`) and SCOPE-flatten (`flatten.pos_5.neg_1`) PFT models.
-It does not write `arguments.json`. A `MultiTrainDataset` path is left commented out.
+It also writes `<output_dir>/arguments.json` (all model, data and training arguments).
 
 **Data it expects:** `query_id, query_text, positive_document_ids, negative_document_ids` +
 a corpus with `docid, text[, title]`.

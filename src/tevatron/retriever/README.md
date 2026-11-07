@@ -62,7 +62,7 @@ No new fields (the multi-view fields were removed; see [`MULTIVIEW.md`](MULTIVIE
 ### `save_args_to_json(output_path, **arg_groups)`
 
 - **Input:** a path, and any number of dataclass instances as keyword arguments (e.g. `model_args=…, data_args=…`).
-- **Output:** writes `{group_name: asdict(args)}` as JSON. Used to dump `arguments.json` into the output directory.
+- **Output:** writes `{group_name: asdict(args)}` as JSON (rank 0 only; creates the directory if needed). `train_dev.py` and `train_dualdistil.py` use it to save `<output_dir>/arguments.json`.
 
 ---
 
@@ -199,21 +199,27 @@ padded to the longest sequence in the batch (`pad_to_multiple_of` is respected).
 
 ### `TevatronTrainer`
 
-- `set_validator(validator)`: attaches a validator from `callback/`.
-- `training_step`: when `global_step % eval_steps == 0` and a validator is set, it calls
-  `prediction_step` before the normal step.
-- `prediction_step(model, inputs, …)`: on rank 0 only, runs `validator.run(model, device)`, logs
-  every metric as `eval/<name>` and their mean as `eval/avg`. Returns `(avg, None, None)`.
-- `compute_loss`: the normal path is unchanged (`model(query, passage).loss`). A dict input
-  (`{'inputs': …}`) is a legacy eval path that also logs `eval/acc`.
+In-training evaluation is done by a **validator** (see [`callback/`](callback/README.md)), not by
+HF's loss-based `evaluate()`. No driver passes an `eval_dataset`, and there is **no evaluation
+loss**: the validator reports ranking metrics on separate validation sets.
+
+- `set_validator(validator)`: attaches a validator.
+- `training_step`: when a validator is attached and `global_step % eval_steps == 0` (including
+  step 0), it calls `validation_step(model)` before the normal step. If `--eval_steps` is unset, this is skipped.
+- `validation_step(model)` (new): on rank 0 only, runs `validator.run(model, device)` and logs every
+  metric as `eval/<name>` and their mean as `eval/avg`. The other ranks go straight on and wait at the
+  next synchronisation. HF's own `prediction_step` is **not** overridden.
+- `compute_loss`: unchanged from upstream (`model(query, passage).loss`).
 - `autocast_smart_context_manager`: forces bf16/fp16 autocast based on `--bf16`/`--fp16`.
-  (Note: the `contextlib` it falls back to is not imported; that branch is only reached with no GPU and no CPU AMP.)
-- `get_eval_dataloader`: plain non-shuffled `DataLoader` (only reached with `--do_eval`; no driver uses it).
+
+> Do not pass `--eval_strategy steps`: HF would then run its own `evaluate()`, which needs an
+> `eval_dataset`. `--eval_steps N` alone is what sets the validator interval.
 
 ### `DistilTevatronTrainer`
 
-Same KL-distillation loss as upstream, but it now unwraps `model.module` (DDP / accelerate) before
-gathering `reranker_labels`, and it gets the same validator hook.
+Same KL-distillation loss and `training_step` as upstream. The only change is that it unwraps
+`model.module` (DDP / accelerate) before gathering `reranker_labels`. The validator hook is
+inherited from `TevatronTrainer`.
 
 **Loss:** `KL( softmax(teacher/T) ‖ log_softmax(student_local/T) )`, where `student_local` is
 the `[B, G]` block of each query's own documents and `T = distil_temperature`.

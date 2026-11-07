@@ -236,11 +236,16 @@ class TevatronTrainingArguments(TrainingArguments):
     sq_contrastive_lambda: Optional[float] = field(default=0.0, metadata={"help": "learning weight for sq_constrative"})
 
 def save_args_to_json(output_path: str, **arg_groups: Any):
-    output = {}
+    """Dump every argument group (e.g. model_args=..., data_args=...) to one JSON file.
+    Only the main process writes; the parent directory is created if needed."""
+    if int(os.environ.get("RANK", "0")) != 0:
+        return
 
+    output = {}
     for name, args in arg_groups.items():
         output[name] = asdict(args)
 
+    os.makedirs(os.path.dirname(os.path.abspath(output_path)), exist_ok=True)
     with open(output_path, "w") as f:
-        json.dump(output, f, indent=2, sort_keys=True)
+        json.dump(output, f, indent=2, sort_keys=True, default=str)
 

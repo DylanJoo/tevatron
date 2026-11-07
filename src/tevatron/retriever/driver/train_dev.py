@@ -11,6 +11,7 @@ from transformers.trainer_utils import get_last_checkpoint
 
 from tevatron.retriever.arguments import ModelArguments, DataArguments, \
     TevatronTrainingArguments as TrainingArguments
+from tevatron.retriever.arguments import save_args_to_json
 from tevatron.retriever.dataset import TrainDataset
 from tevatron.retriever.collator import TrainCollator, EncodeCollator
 from tevatron.retriever.modeling import DenseModel
@@ -40,6 +41,11 @@ def main():
         raise ValueError(
             f"Output directory ({training_args.output_dir}) already exists and is not empty. Use --overwrite_output_dir to overcome."
         )
+
+    save_args_to_json(
+        f"{training_args.output_dir}/arguments.json",
+        model_args=model_args, data_args=data_args, training_args=training_args
+    )
 
     # Setup logging
     logging.basicConfig(
@@ -89,28 +95,15 @@ def main():
         attn_implementation=model_args.attn_implementation,
     )
 
-    # if len(data_args.dataset_name) == 1:
-    #     data_args.dataset_name = data_args.dataset_name[0]
-    #     data_args.dataset_split = data_args.dataset_split[0]
-    #     data_args.corpus_name = data_args.corpus_name[0]
-    #     train_dataset = TrainDataset(data_args)
-    # else:
-    #     print(data_args)
-    #     train_dataset = MultiTrainDataset(data_args,
-    #                                       dataset_list=data_args.dataset_name,
-    #                                       corpus_list=data_args.corpus_name,
-    #                                       dataset_split_list=data_args.dataset_split)
     train_dataset = TrainDataset(data_args)
 
     collator = TrainCollator(data_args, tokenizer)
-    eval_dataset = None
 
     trainer_cls = Trainer
     trainer = trainer_cls(
         model=model,
         args=training_args,
         train_dataset=train_dataset,
-        eval_dataset=eval_dataset,
         data_collator=collator
     )
 
