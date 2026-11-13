@@ -87,6 +87,13 @@ class DataArguments:
     exclude_title: bool = field(default=False, metadata={"help": "append title in the begining."})
     request_as_query: bool = field(default=False, metadata={"help": "replace query with long request."})
     train_irrelevant_size: int = field(default=0, metadata={"help": "number of passages used to train for each query"})
+    chunk_field: Optional[str] = field(
+        default=None, metadata={
+            "help": "regular doc: None. Cut each passage into units: 'text' (sentences) or 'claims'"})
+    chunk_size: int = field(
+        default=1, metadata={"help": "sentences/claims per unit; 0 = all joined into one unit with the original docid"})
+    chunk_stride: Optional[int] = field(default=None, metadata={"help": "default: --chunk_size (non-overlapping)"})
+    chunk_min_words: int = field(default=3, metadata={"help": "drop sentences with fewer words (sentence units only)"})
 
 
     dataset_name: str = field(
