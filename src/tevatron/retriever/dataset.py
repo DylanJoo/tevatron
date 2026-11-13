@@ -7,6 +7,7 @@ from torch.utils.data import Dataset
 from PIL import Image
 
 from tevatron.retriever.arguments import DataArguments
+from tevatron.retriever.units import to_units
 
 import logging
 from tqdm import tqdm
@@ -267,6 +268,25 @@ class EncodeDataset(Dataset):
             if "title" in self.encode_data.column_names:
                 self.encode_data = self.encode_data.remove_columns(['title'])
                 logger.warning("Title is excluded.")
+
+        # cut documents into sentence/claim units 
+        # (rows become {docid: unit id, text: title + unit text})
+        if self.data_args.chunk_field and not self.data_args.encode_is_query:
+            n_docs = len(self.encode_data)
+            self.encode_data = self.encode_data.map(
+                to_units,
+                batched=True,
+                remove_columns=self.encode_data.column_names,
+                num_proc=self.data_args.num_proc,
+                fn_kwargs=dict(
+                    field=self.data_args.chunk_field, 
+                    size=self.data_args.chunk_size,
+                    stride=self.data_args.chunk_stride, 
+                    min_words=self.data_args.chunk_min_words
+                ),
+                desc=f'Cutting {self.data_args.chunk_field} into units',
+            )
+            logger.info(f'{n_docs} documents -> {len(self.encode_data)} units')
 
     def __len__(self):
         return len(self.encode_data)
