@@ -98,6 +98,7 @@ def main():
     )
     encoded = []
     lookup_indices = []
+    output_dtype = {None: None, 'float16': torch.float16, 'float32': torch.float32}[data_args.encode_output_dtype]
     model = model.to(training_args.device)
     model.eval()
 
@@ -109,10 +110,13 @@ def main():
                     batch[k] = v.to(training_args.device)
                 if data_args.encode_is_query:
                     model_output: EncoderOutput = model(query=batch)
-                    encoded.append(model_output.q_reps.cpu().detach().numpy())
+                    reps = model_output.q_reps
                 else:
                     model_output: EncoderOutput = model(passage=batch)
-                    encoded.append(model_output.p_reps.cpu().detach().numpy())
+                    reps = model_output.p_reps
+                if output_dtype is not None:
+                    reps = reps.to(output_dtype)  # only the saved vectors; the model keeps its precision
+                encoded.append(reps.cpu().detach().numpy())
 
     encoded = np.concatenate(encoded)
 

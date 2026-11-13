@@ -152,6 +152,9 @@ class DataArguments:
 
     encode_is_query: bool = field(default=False)
     encode_output_path: str = field(default=None, metadata={"help": "where to save the encode"})
+    encode_output_dtype: Optional[str] = field(
+        default=None, metadata={"help": "cast the saved vectors to 'float16' or 'float32' (the model still runs in "
+                                        "its own precision); default keeps the model's output dtype. Needed with --bf16."})
 
 
     query_max_len: Optional[int] = field(
