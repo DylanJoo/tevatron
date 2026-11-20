@@ -26,7 +26,7 @@ logger = logging.getLogger(__name__)
 
 @dataclass
 class IndexArguments:
-    index_factory: str = field(default="SQ8", metadata={"help": "faiss index_factory string: SQ8, SQ4, PQ96, ..."})
+    index_factory: str = field(default="SQ8", metadata={"help": "faiss index_factory string: SQ4 (default), SQ8, PQ96, ..."})
     trained_index_path: Optional[str] = field(
         default=None, metadata={"help": "trained, empty index shared by all shards: loaded if it exists, "
                                         "otherwise trained and written here"})
